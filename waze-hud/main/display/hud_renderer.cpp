@@ -65,11 +65,17 @@ bool hasSettingsChanged(const DeviceSettings &a, const DeviceSettings &b) {
     return a.brightness != b.brightness ||
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
            a.autoBrightness != b.autoBrightness ||
+           a.invertColor != b.invertColor ||
+           a.colorBgr != b.colorBgr ||
+           a.backlightPin != b.backlightPin ||
+           a.overspeedBorder != b.overspeedBorder ||
 #endif
            a.theme != b.theme || a.showStreet != b.showStreet ||
            a.speedDisplayMode != b.speedDisplayMode ||
            a.mirrorHud != b.mirrorHud || a.rotateDisplay != b.rotateDisplay ||
            a.overspeedOffsetKmh != b.overspeedOffsetKmh ||
+           a.speedOffsetKmh != b.speedOffsetKmh ||
+           a.speedOffsetPercent != b.speedOffsetPercent ||
            a.offsetX != b.offsetX || a.offsetY != b.offsetY || a.revision != b.revision;
 }
 
@@ -77,7 +83,8 @@ bool firmwareOverspeed(const HudState &state, const DeviceSettings &settings) {
     if (state.speedLimitKmh <= 0) return false;
     const int threshold = std::max(0, state.speedLimitKmh +
                                      static_cast<int>(settings.overspeedOffsetKmh));
-    return state.speedKmh > threshold;
+    const int effectiveSpeed = adjustedSpeed(state.speedKmh, settings);
+    return effectiveSpeed > threshold;
 }
 
 uint16_t alertDistanceColor(int distanceM, uint16_t normalColor) {
@@ -451,6 +458,7 @@ esp_err_t HudRenderer::init() {
 
 void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
                          const SystemStatusSnapshot &systemStatus) {
+    anyRegionRenderedThisFrame_ = false;
     const int64_t currentClockMillis = localClockMillis(state);
     const int64_t currentClockSecond = currentClockMillis == INT64_MIN
         ? INT64_MIN : currentClockMillis / 1000LL;
@@ -507,6 +515,11 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
             settings.mirrorHud, settings.rotateDisplay);
         if (orientationResult != ESP_OK)
             ESP_LOGE(kTag, "HUD orientation update failed: %s", esp_err_to_name(orientationResult));
+#if CONFIG_WAZE_HUD_DISPLAY_CYD_28
+        DisplayDriver::instance().setInvertColor(settings.invertColor);
+        DisplayDriver::instance().setColorBgr(settings.colorBgr);
+        DisplayDriver::instance().setBacklightPin(settings.backlightPin);
+#endif
     }
     const bool systemStatusChanged = firstFrame_ || systemStatus != previousSystemStatus_;
     const bool limitPrimary = settings.speedDisplayMode == SpeedDisplayMode::LimitPrimary;
@@ -536,6 +549,7 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
         previous_ = state;
         previousSettings_ = settings;
         previousSystemStatus_ = systemStatus;
+        renderOverspeedBorder(state, settings, anyRegionRenderedThisFrame_);
         firstFrame_ = false;
         return;
     }
@@ -545,7 +559,9 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
         renderAll();
         streetRendered = true;
     } else if (noNavigation) {
-        const bool speedChanged = state.speedKmh != previous_.speedKmh ||
+        const int currSpeed = adjustedSpeed(state.speedKmh, settings);
+        const int prevSpeed = adjustedSpeed(previous_.speedKmh, previousSettings_);
+        const bool speedChanged = currSpeed != prevSpeed ||
                                   state.speedLimitKmh != previous_.speedLimitKmh;
         const bool limitChanged = state.speedLimitKmh != previous_.speedLimitKmh ||
                                   state.hasMinimumSpeed != previous_.hasMinimumSpeed ||
@@ -568,7 +584,9 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
         }
     } else {
         if (maneuverChanged(state, previous_)) renderRegion(layout::Maneuver,state,settings,systemStatus);
-        const bool speedChanged = state.speedKmh != previous_.speedKmh ||
+        const int currSpeed = adjustedSpeed(state.speedKmh, settings);
+        const int prevSpeed = adjustedSpeed(previous_.speedKmh, previousSettings_);
+        const bool speedChanged = currSpeed != prevSpeed ||
                                   state.speedLimitKmh != previous_.speedLimitKmh;
         const bool limitChanged = state.speedLimitKmh != previous_.speedLimitKmh ||
                                   state.hasMinimumSpeed != previous_.hasMinimumSpeed ||
@@ -602,12 +620,14 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
     renderedClockMinute_ = currentClockMinute;
     renderedClockPhase_ = currentClockPhase;
     if (streetRendered) marqueeRenderedOffset_ = marqueeOffset_;
+    renderOverspeedBorder(state, settings, anyRegionRenderedThisFrame_);
     firstFrame_ = false;
 }
 
 void HudRenderer::renderRegion(const Rect &region, const HudState &state,
                                const DeviceSettings &settings,
                                const SystemStatusSnapshot &systemStatus) {
+    anyRegionRenderedThisFrame_ = true;
     const Rect physicalRegion = layout::physicalRect(region);
     Canvas canvas(buffer_, physicalRegion.width, physicalRegion.height,
                   region.width, region.height);
@@ -806,7 +826,8 @@ void HudRenderer::renderManeuver(Canvas &canvas, const HudState &state, const De
 void HudRenderer::renderSpeed(Canvas &canvas, const HudState &state, const DeviceSettings &settings) {
     canvas.clear(colors::Background);
     const uint16_t color = firmwareOverspeed(state, settings) ? colors::Red : foreground(settings);
-    char speed[5]; std::snprintf(speed,sizeof(speed),"%d",std::clamp(state.speedKmh,0,999));
+    const int effectiveSpeed = adjustedSpeed(state.speedKmh, settings);
+    char speed[12]; std::snprintf(speed, sizeof(speed), "%d", std::clamp(effectiveSpeed, 0, 999));
     canvas.fontText(2,mainY(26),speed,assets::kNumberLarge,color,canvas.width()-4,true);
     canvas.fontText(2,mainY(90),"km/h",assets::kTextSmall,colors::Muted,canvas.width()-4,true);
 }
@@ -834,8 +855,9 @@ void HudRenderer::renderLimitPrimary(Canvas &canvas, const HudState &state,
                            assets::kNoSpeedCurrent);
     }
 
-    char speed[5];
-    std::snprintf(speed, sizeof(speed), "%d", std::clamp(state.speedKmh, 0, 999));
+    const int effectiveSpeed = adjustedSpeed(state.speedKmh, settings);
+    char speed[12];
+    std::snprintf(speed, sizeof(speed), "%d", std::clamp(effectiveSpeed, 0, 999));
     const uint16_t speedColor = firmwareOverspeed(state, settings)
         ? colors::Red : foreground(settings);
     canvas.fontText(96, 101, speed, assets::kNumberMedium,
@@ -1010,7 +1032,8 @@ void HudRenderer::renderV3Speed(Canvas &canvas, const HudState &state,
                                 const DeviceSettings &settings) {
     canvas.clear(colors::Panel);
     const uint16_t color = firmwareOverspeed(state, settings) ? colors::Red : foreground(settings);
-    char speed[5]; std::snprintf(speed,sizeof(speed),"%d",std::clamp(state.speedKmh,0,999));
+    const int effectiveSpeed = adjustedSpeed(state.speedKmh, settings);
+    char speed[12]; std::snprintf(speed, sizeof(speed), "%d", std::clamp(effectiveSpeed, 0, 999));
     const int speedY = canvas.height() * 9 / 20 - assets::kNumberLarge.lineHeight / 2;
     canvas.fontText(2,speedY,speed,assets::kNumberLarge,color,canvas.width()-4,true);
     canvas.fontText(2,speedY + assets::kNumberLarge.lineHeight + 4,"km/h",assets::kTextSmall,
@@ -1056,9 +1079,93 @@ void HudRenderer::renderV3Bar(Canvas &canvas, const HudState &state,
     if (state.speedLimitKmh <= 0) return;
     const bool over = firmwareOverspeed(state, settings);
     const int inner = width - 6;
+    const int effectiveSpeed = adjustedSpeed(state.speedKmh, settings);
     const int fill = over ? inner
-        : inner * std::clamp(state.speedKmh, 0, state.speedLimitKmh) / state.speedLimitKmh;
+        : inner * std::clamp(effectiveSpeed, 0, state.speedLimitKmh) / state.speedLimitKmh;
     canvas.fillRect(x + 3, y + 3, fill, barHeight - 6, over ? colors::Red : colors::Blue);
+}
+
+namespace {
+constexpr int16_t kBorderThickness = 3;
+// Edge A: Cạnh trên (Top)
+constexpr Rect kEdgeA{0, 0, layout::Width, kBorderThickness};
+// Edge D: Cạnh dưới (Bottom)
+constexpr Rect kEdgeD{0, static_cast<int16_t>(layout::Height - kBorderThickness),
+                      layout::Width, kBorderThickness};
+// Edge C: Cạnh trái (Left)
+constexpr Rect kEdgeC{0, kBorderThickness, kBorderThickness,
+                      static_cast<int16_t>(layout::Height - 2 * kBorderThickness)};
+// Edge B: Cạnh phải (Right)
+constexpr Rect kEdgeB{static_cast<int16_t>(layout::Width - kBorderThickness), kBorderThickness,
+                      kBorderThickness, static_cast<int16_t>(layout::Height - 2 * kBorderThickness)};
+
+constexpr uint8_t kMaskEdgeA = 1U << 0;
+constexpr uint8_t kMaskEdgeB = 1U << 1;
+constexpr uint8_t kMaskEdgeD = 1U << 2;
+constexpr uint8_t kMaskEdgeC = 1U << 3;
+}  // namespace
+
+void HudRenderer::drawBorderEdge(const Rect &edge, uint16_t color) {
+    const Rect physical = layout::physicalRect(edge);
+    const int pixelCount = physical.width * physical.height;
+    std::fill(buffer_, buffer_ + pixelCount, color);
+    DisplayDriver::instance().drawRegion(physical, buffer_);
+}
+
+void HudRenderer::renderOverspeedBorder(const HudState &state, const DeviceSettings &settings, bool forceRedraw) {
+    const bool isOverspeed =
+#if CONFIG_WAZE_HUD_DISPLAY_CYD_28
+        settings.overspeedBorder &&
+#endif
+        !SystemStatus::instance().snapshot().visible &&
+        state.connected && state.hasProducerState &&
+        (state.overSpeed || firmwareOverspeed(state, settings));
+
+    if (!isOverspeed) {
+        if (previousBorderMask_ != 0) {
+            if (previousBorderMask_ & kMaskEdgeA) drawBorderEdge(kEdgeA, 0x0000);
+            if (previousBorderMask_ & kMaskEdgeB) drawBorderEdge(kEdgeB, 0x0000);
+            if (previousBorderMask_ & kMaskEdgeD) drawBorderEdge(kEdgeD, 0x0000);
+            if (previousBorderMask_ & kMaskEdgeC) drawBorderEdge(kEdgeC, 0x0000);
+            previousBorderMask_ = 0;
+        }
+        overspeedBorderActive_ = false;
+        return;
+    }
+
+    overspeedBorderActive_ = true;
+
+    // Chu kỳ 500ms (2 Hz):
+    // 0..199ms: Segment 1 (C -> A -> B) sáng đỏ (Trái, Trên, Phải), D tắt
+    // 200..249ms: Nghỉ tắt (dark gap)
+    // 250..449ms: Segment 2 (B -> D -> C) sáng đỏ (Phải, Dưới, Trái), A tắt
+    // 450..499ms: Nghỉ tắt (dark gap)
+    const uint64_t nowMs = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+    const uint64_t phase = nowMs % 500ULL;
+    uint8_t targetMask = 0;
+
+    if (phase < 200ULL) {
+        targetMask = kMaskEdgeC | kMaskEdgeA | kMaskEdgeB;
+    } else if (phase >= 250ULL && phase < 450ULL) {
+        targetMask = kMaskEdgeB | kMaskEdgeD | kMaskEdgeC;
+    } else {
+        targetMask = 0;
+    }
+
+    auto updateEdge = [this, targetMask, forceRedraw](uint8_t bit, const Rect &edge) {
+        const bool shouldBeOn = (targetMask & bit) != 0;
+        const bool wasOn = (previousBorderMask_ & bit) != 0;
+        if (shouldBeOn != wasOn || (shouldBeOn && forceRedraw)) {
+            drawBorderEdge(edge, shouldBeOn ? colors::Red : 0x0000);
+        }
+    };
+
+    updateEdge(kMaskEdgeA, kEdgeA);
+    updateEdge(kMaskEdgeB, kEdgeB);
+    updateEdge(kMaskEdgeD, kEdgeD);
+    updateEdge(kMaskEdgeC, kEdgeC);
+
+    previousBorderMask_ = targetMask;
 }
 
 }  // namespace waze_hud

@@ -14,11 +14,15 @@ namespace {
 constexpr char kTag[] = "CONFIG";
 constexpr char kNamespace[] = "hud_cfg";
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
-constexpr int kItemCount = 10;
+constexpr int kItemCount = 16;
+constexpr uint32_t kBitSpeedOffsetKmh = 1U << 14;
+constexpr uint32_t kBitSpeedOffsetPct = 1U << 15;
 #else
-constexpr int kItemCount = 9;
+constexpr int kItemCount = 11;
+constexpr uint32_t kBitSpeedOffsetKmh = 1U << 9;
+constexpr uint32_t kBitSpeedOffsetPct = 1U << 10;
 #endif
-constexpr uint32_t kSchemaRevision = 7;
+constexpr uint32_t kSchemaRevision = 10;
 
 bool validBrightness(int value) {
     return value >= 10 && value <= 100 && ((value - 10) % 5) == 0;
@@ -77,6 +81,10 @@ esp_err_t saveSettings(const DeviceSettings &settings) {
     esp_err_t result = nvs_set_u8(nvs, "brightness", settings.brightness);
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
     if (result == ESP_OK) result = nvs_set_u8(nvs, "auto_bright", settings.autoBrightness ? 1 : 0);
+    if (result == ESP_OK) result = nvs_set_u8(nvs, "invert_color", settings.invertColor ? 1 : 0);
+    if (result == ESP_OK) result = nvs_set_u8(nvs, "color_bgr", settings.colorBgr ? 1 : 0);
+    if (result == ESP_OK) result = nvs_set_u8(nvs, "bl_pin", settings.backlightPin);
+    if (result == ESP_OK) result = nvs_set_u8(nvs, "over_border", settings.overspeedBorder ? 1 : 0);
 #endif
     if (result == ESP_OK) result = nvs_set_u8(nvs, "theme", static_cast<uint8_t>(settings.theme));
     if (result == ESP_OK) result = nvs_set_u8(nvs, "speed_mode", static_cast<uint8_t>(settings.speedDisplayMode));
@@ -84,6 +92,8 @@ esp_err_t saveSettings(const DeviceSettings &settings) {
     if (result == ESP_OK) result = nvs_set_u8(nvs, "mirror", settings.mirrorHud ? 1 : 0);
     if (result == ESP_OK) result = nvs_set_u8(nvs, "rotate", settings.rotateDisplay ? 1 : 0);
     if (result == ESP_OK) result = nvs_set_i8(nvs, "over_offset", settings.overspeedOffsetKmh);
+    if (result == ESP_OK) result = nvs_set_i8(nvs, "spd_off_kmh", settings.speedOffsetKmh);
+    if (result == ESP_OK) result = nvs_set_i8(nvs, "spd_off_pct", settings.speedOffsetPercent);
     if (result == ESP_OK) result = nvs_set_i8(nvs, "offset_x", settings.offsetX);
     if (result == ESP_OK) result = nvs_set_i8(nvs, "offset_y", settings.offsetY);
     if (result == ESP_OK) result = nvs_set_u32(nvs, "revision", settings.revision);
@@ -135,6 +145,10 @@ esp_err_t DeviceConfig::init() {
     }
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
     if (nvs_get_u8(nvs, "auto_bright", &byte) == ESP_OK) active_.autoBrightness = byte != 0;
+    if (nvs_get_u8(nvs, "invert_color", &byte) == ESP_OK) active_.invertColor = byte != 0;
+    if (nvs_get_u8(nvs, "color_bgr", &byte) == ESP_OK) active_.colorBgr = byte != 0;
+    if (nvs_get_u8(nvs, "bl_pin", &byte) == ESP_OK && (byte == 21 || byte == 27)) active_.backlightPin = byte;
+    if (nvs_get_u8(nvs, "over_border", &byte) == ESP_OK) active_.overspeedBorder = byte != 0;
 #endif
     if (nvs_get_u8(nvs, "theme", &byte) == ESP_OK && byte <= static_cast<uint8_t>(UiTheme::Night))
         active_.theme = static_cast<UiTheme>(byte);
@@ -147,6 +161,11 @@ esp_err_t DeviceConfig::init() {
     int8_t offset = 0;
     if (nvs_get_i8(nvs, "over_offset", &offset) == ESP_OK && offset >= -10 && offset <= 5)
         active_.overspeedOffsetKmh = offset;
+    int8_t speedOffset = 0;
+    if (nvs_get_i8(nvs, "spd_off_kmh", &speedOffset) == ESP_OK && speedOffset >= -20 && speedOffset <= 20)
+        active_.speedOffsetKmh = speedOffset;
+    if (nvs_get_i8(nvs, "spd_off_pct", &speedOffset) == ESP_OK && speedOffset >= -20 && speedOffset <= 20)
+        active_.speedOffsetPercent = speedOffset;
     if (nvs_get_i8(nvs, "offset_x", &offset) == ESP_OK && offset >= -5 && offset <= 5) active_.offsetX = offset;
     if (nvs_get_i8(nvs, "offset_y", &offset) == ESP_OK && offset >= -5 && offset <= 5) active_.offsetY = offset;
     (void)nvs_get_u32(nvs, "revision", &active_.revision);
@@ -221,12 +240,12 @@ void DeviceConfig::publishSchema(HlpSendLine send, void *context) {
     if (!root) return;
     cJSON_AddNumberToObject(root, "rev", settings.revision);
     cJSON_AddNumberToObject(root, "count", kItemCount);
-    cJSON_AddStringToObject(root, "title", "Cau hinh Waze HUD");
+    cJSON_AddStringToObject(root, "title", "Cấu hình Waze HUD");
     sendJson(root, send, context);
 
-    root = schemaItem(settings.revision, "speed_display", "selection", "Hien thi toc do");
+    root = schemaItem(settings.revision, "speed_display", "selection", "Hiển thị tốc độ");
     const char *speedValues[] = {"current_main", "limit_main", "no_nav"};
-    const char *speedLabels[] = {"Toc do hien tai", "Bien gioi han", "Khong dan duong"};
+    const char *speedLabels[] = {"Tốc độ hiện tại", "Biển giới hạn", "Không dẫn đường"};
     cJSON_AddStringToObject(root, "value",
         speedValues[static_cast<uint8_t>(settings.speedDisplayMode)]);
     cJSON *options = cJSON_AddArrayToObject(root, "options");
@@ -238,22 +257,44 @@ void DeviceConfig::publishSchema(HlpSendLine send, void *context) {
     }
     sendJson(root, send, context);
 
-    root = schemaItem(settings.revision, "brightness", "slider", "Do sang");
+    root = schemaItem(settings.revision, "brightness", "slider", "Độ sáng");
     cJSON_AddNumberToObject(root, "value", settings.brightness);
     cJSON_AddNumberToObject(root, "min", 10); cJSON_AddNumberToObject(root, "max", 100);
     cJSON_AddNumberToObject(root, "step", 5); sendJson(root, send, context);
 
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
-    root = schemaItem(settings.revision, "auto_brightness", "toggle", "Tu dong do sang");
+    root = schemaItem(settings.revision, "auto_brightness", "toggle", "Tự động độ sáng");
     cJSON_AddBoolToObject(root, "value", settings.autoBrightness); sendJson(root, send, context);
+
+    root = schemaItem(settings.revision, "invert_color", "toggle", "Đảo màu màn hình");
+    cJSON_AddBoolToObject(root, "value", settings.invertColor); sendJson(root, send, context);
+
+    root = schemaItem(settings.revision, "color_bgr", "toggle", "Thứ tự màu BGR (Tắt = RGB)");
+    cJSON_AddBoolToObject(root, "value", settings.colorBgr); sendJson(root, send, context);
+
+    root = schemaItem(settings.revision, "backlight_pin", "selection", "Chân đèn nền Backlight");
+    cJSON_AddStringToObject(root, "value", settings.backlightPin == 27 ? "gpio_27" : "gpio_21");
+    options = cJSON_AddArrayToObject(root, "options");
+    cJSON *opt1 = cJSON_CreateObject();
+    cJSON_AddStringToObject(opt1, "value", "gpio_21");
+    cJSON_AddStringToObject(opt1, "label", "GPIO 21 (CYD 2.8\" mặc định)");
+    cJSON_AddItemToArray(options, opt1);
+    cJSON *opt2 = cJSON_CreateObject();
+    cJSON_AddStringToObject(opt2, "value", "gpio_27");
+    cJSON_AddStringToObject(opt2, "label", "GPIO 27 (CYD 2.4\" một số bản)");
+    cJSON_AddItemToArray(options, opt2);
+    sendJson(root, send, context);
+
+    root = schemaItem(settings.revision, "overspeed_border", "toggle", "Viền đỏ khi quá tốc");
+    cJSON_AddBoolToObject(root, "value", settings.overspeedBorder); sendJson(root, send, context);
 #endif
 
-    root = schemaItem(settings.revision, "theme", "selection", "Giao dien");
+    root = schemaItem(settings.revision, "theme", "selection", "Giao diện");
     const char *theme = settings.theme == UiTheme::Day ? "day" : settings.theme == UiTheme::Night ? "night" : "auto";
     cJSON_AddStringToObject(root, "value", theme);
     options = cJSON_AddArrayToObject(root, "options");
     const char *values[] = {"auto", "day", "night"};
-    const char *labels[] = {"Tu dong", "Ban ngay", "Ban dem"};
+    const char *labels[] = {"Tự động", "Ban ngày", "Ban đêm"};
     for (int i = 0; i < 3; ++i) {
         cJSON *option = cJSON_CreateObject();
         cJSON_AddStringToObject(option, "value", values[i]); cJSON_AddStringToObject(option, "label", labels[i]);
@@ -261,26 +302,38 @@ void DeviceConfig::publishSchema(HlpSendLine send, void *context) {
     }
     sendJson(root, send, context);
 
-    root = schemaItem(settings.revision, "show_street", "toggle", "Hien ten duong");
+    root = schemaItem(settings.revision, "show_street", "toggle", "Hiện tên đường");
     cJSON_AddBoolToObject(root, "value", settings.showStreet); sendJson(root, send, context);
 
-    root = schemaItem(settings.revision, "mirror_hud", "toggle", "Phan chieu HUD");
+    root = schemaItem(settings.revision, "mirror_hud", "toggle", "Phản chiếu HUD (Kính lái)");
     cJSON_AddBoolToObject(root, "value", settings.mirrorHud); sendJson(root, send, context);
 
-    root = schemaItem(settings.revision, "rotate_display", "toggle", "Xoay 180 do (USB ben phai)");
+    root = schemaItem(settings.revision, "rotate_display", "toggle", "Xoay 180° (USB bên phải)");
     cJSON_AddBoolToObject(root, "value", settings.rotateDisplay); sendJson(root, send, context);
 
-    root = schemaItem(settings.revision, "overspeed_offset", "slider", "Nguong canh bao toc do");
+    root = schemaItem(settings.revision, "overspeed_offset", "slider", "Ngưỡng cảnh báo tốc độ");
     cJSON_AddNumberToObject(root, "value", settings.overspeedOffsetKmh);
     cJSON_AddNumberToObject(root, "min", -10); cJSON_AddNumberToObject(root, "max", 5);
     cJSON_AddNumberToObject(root, "step", 1);
     sendJson(root, send, context);
 
-    root = schemaItem(settings.revision, "offset_x", "integer", "Dich ngang");
+    root = schemaItem(settings.revision, "speed_offset_kmh", "slider", "Bù tốc độ (km/h)");
+    cJSON_AddNumberToObject(root, "value", settings.speedOffsetKmh);
+    cJSON_AddNumberToObject(root, "min", -20); cJSON_AddNumberToObject(root, "max", 20);
+    cJSON_AddNumberToObject(root, "step", 1);
+    sendJson(root, send, context);
+
+    root = schemaItem(settings.revision, "speed_offset_pct", "slider", "Bù tốc độ (%)");
+    cJSON_AddNumberToObject(root, "value", settings.speedOffsetPercent);
+    cJSON_AddNumberToObject(root, "min", -20); cJSON_AddNumberToObject(root, "max", 20);
+    cJSON_AddNumberToObject(root, "step", 1);
+    sendJson(root, send, context);
+
+    root = schemaItem(settings.revision, "offset_x", "integer", "Dịch ngang");
     cJSON_AddNumberToObject(root, "value", settings.offsetX);
     cJSON_AddNumberToObject(root, "min", -5); cJSON_AddNumberToObject(root, "max", 5); sendJson(root, send, context);
 
-    root = schemaItem(settings.revision, "offset_y", "integer", "Dich doc");
+    root = schemaItem(settings.revision, "offset_y", "integer", "Dịch dọc");
     cJSON_AddNumberToObject(root, "value", settings.offsetY);
     cJSON_AddNumberToObject(root, "min", -5); cJSON_AddNumberToObject(root, "max", 5); sendJson(root, send, context);
 
@@ -328,6 +381,24 @@ bool DeviceConfig::handleMessage(const cJSON *root, HlpSendLine send, void *cont
         } else if (std::strcmp(id->valuestring, "auto_brightness") == 0) {
             bit = 1U << 9; valid = cJSON_IsBool(value);
             if (valid) pending.draft.autoBrightness = cJSON_IsTrue(value);
+        } else if (std::strcmp(id->valuestring, "invert_color") == 0) {
+            bit = 1U << 10; valid = cJSON_IsBool(value);
+            if (valid) pending.draft.invertColor = cJSON_IsTrue(value);
+        } else if (std::strcmp(id->valuestring, "color_bgr") == 0) {
+            bit = 1U << 11; valid = cJSON_IsBool(value);
+            if (valid) pending.draft.colorBgr = cJSON_IsTrue(value);
+        } else if (std::strcmp(id->valuestring, "backlight_pin") == 0) {
+            bit = 1U << 12; valid = cJSON_IsString(value);
+            if (valid && std::strcmp(value->valuestring, "gpio_21") == 0) {
+                pending.draft.backlightPin = 21;
+            } else if (valid && std::strcmp(value->valuestring, "gpio_27") == 0) {
+                pending.draft.backlightPin = 27;
+            } else {
+                valid = false;
+            }
+        } else if (std::strcmp(id->valuestring, "overspeed_border") == 0) {
+            bit = 1U << 13; valid = cJSON_IsBool(value);
+            if (valid) pending.draft.overspeedBorder = cJSON_IsTrue(value);
 #endif
         } else if (std::strcmp(id->valuestring, "theme") == 0) {
             bit = 1U << 1; valid = cJSON_IsString(value);
@@ -344,6 +415,12 @@ bool DeviceConfig::handleMessage(const cJSON *root, HlpSendLine send, void *cont
         } else if (std::strcmp(id->valuestring, "overspeed_offset") == 0) {
             bit = 1U << 7; valid = exactInteger(value, -10, 5, integer);
             if (valid) pending.draft.overspeedOffsetKmh = static_cast<int8_t>(integer);
+        } else if (std::strcmp(id->valuestring, "speed_offset_kmh") == 0) {
+            bit = kBitSpeedOffsetKmh; valid = exactInteger(value, -20, 20, integer);
+            if (valid) pending.draft.speedOffsetKmh = static_cast<int8_t>(integer);
+        } else if (std::strcmp(id->valuestring, "speed_offset_pct") == 0) {
+            bit = kBitSpeedOffsetPct; valid = exactInteger(value, -20, 20, integer);
+            if (valid) pending.draft.speedOffsetPercent = static_cast<int8_t>(integer);
         } else if (std::strcmp(id->valuestring, "offset_x") == 0) {
             bit = 1U << 3; valid = exactInteger(value, -5, 5, integer); if (valid) pending.draft.offsetX = integer;
         } else if (std::strcmp(id->valuestring, "offset_y") == 0) {
@@ -380,6 +457,32 @@ bool DeviceConfig::handleMessage(const cJSON *root, HlpSendLine send, void *cont
             pending = {};
             return true;
         }
+
+        const DeviceSettings current = snapshot();
+        const int8_t draftKmh = pending.draft.speedOffsetKmh;
+        const int8_t draftPct = pending.draft.speedOffsetPercent;
+        const int8_t currKmh = current.speedOffsetKmh;
+        const int8_t currPct = current.speedOffsetPercent;
+
+        bool offsetResetOccurred = false;
+        if (draftKmh != currKmh && draftPct == currPct) {
+            // User adjusted km/h slider -> reset percent slider to 0
+            if (draftKmh != 0 && pending.draft.speedOffsetPercent != 0) {
+                pending.draft.speedOffsetPercent = 0;
+                offsetResetOccurred = true;
+            }
+        } else if (draftPct != currPct && draftKmh == currKmh) {
+            // User adjusted percent slider -> reset km/h slider to 0
+            if (draftPct != 0 && pending.draft.speedOffsetKmh != 0) {
+                pending.draft.speedOffsetKmh = 0;
+                offsetResetOccurred = true;
+            }
+        } else if (draftKmh != 0 && draftPct != 0) {
+            // Both non-zero: keep km/h, reset percent
+            pending.draft.speedOffsetPercent = 0;
+            offsetResetOccurred = true;
+        }
+
         pending.draft.revision++;
         const esp_err_t saved = saveSettings(pending.draft);
         lastTransaction = pending.id;
@@ -388,8 +491,13 @@ bool DeviceConfig::handleMessage(const cJSON *root, HlpSendLine send, void *cont
         if (saved == ESP_OK) {
             taskENTER_CRITICAL(&lock_); active_ = pending.draft; taskEXIT_CRITICAL(&lock_);
             sendAck(pending.id, true, pending.draft.revision, nullptr, nullptr, send, context);
-            ESP_LOGI(kTag, "Committed configuration revision %lu", static_cast<unsigned long>(pending.draft.revision));
+            ESP_LOGI(kTag, "Committed configuration revision %lu (spd_off_kmh: %d, spd_off_pct: %d)",
+                     static_cast<unsigned long>(pending.draft.revision),
+                     pending.draft.speedOffsetKmh, pending.draft.speedOffsetPercent);
             HudStateStore::instance().refresh();
+            if (offsetResetOccurred) {
+                publishSchema(send, context);
+            }
         } else {
             ESP_LOGE(kTag, "NVS commit failed: %s", esp_err_to_name(saved));
             sendAck(pending.id, false, snapshot().revision, nullptr, "NVS write failed", send, context);
