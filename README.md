@@ -1,5 +1,11 @@
 # WazeHUD cho màn hình CYD 2.8 inch
 
+> [!NOTE]
+> **Lời cảm ơn & Tôn trọng bản quyền tác giả (Credits & Respect):**
+> Dự án này là phiên bản phát triển & tối ưu hóa mở rộng dựa trên mã nguồn gốc [WazeHUD của tác giả ShindouAris](https://github.com/ShindouAris/WazeHUD) và cộng đồng [WazeMod Vietnam](https://wazemod.io.vn). Xin trân trọng ghi nhận và cảm ơn công sức to lớn của tác giả gốc đã tạo nên nền tảng ban đầu tuyệt vời cho cộng đồng người dùng Waze! Xin hãy luôn tôn trọng tác giả gốc và chia sẻ có trích nguồn.
+
+---
+
 WazeHUD biến mạch ESP32-2432S028 (Cheap Yellow Display) thành màn hình dẫn đường phụ cho ô tô, nhận dữ liệu trực tiếp từ Waze Mod qua Bluetooth Low Energy (BLE).
 
 > [!IMPORTANT]
@@ -24,20 +30,20 @@ WazeHUD biến mạch ESP32-2432S028 (Cheap Yellow Display) thành màn hình d�
 - Cập nhật từng vùng thay đổi để giảm độ trễ khi vẽ màn hình.
 
 ## Cài firmware nhanh
+### 🌐 Cách 1: Nạp trực tiếp qua Web Flasher (Khuyên dùng - Cực dễ cho mọi người)
+Bạn có thể sử dụng công cụ Web Flasher của tác giả WazeMod trực tiếp trên trình duyệt web (Chrome, Edge, Cốc Cốc trên máy tính hoặc điện thoại Android) mà không cần cài đặt Python hay bất kỳ phần mềm nào:
 
-### Chọn đúng file
+1. Bấm nút **📥 Tải về** ở bảng trên để tải file `.bin` phù hợp về máy.
+2. Cắm cáp kết nối mạch CYD với máy tính qua cổng USB.
+3. Truy cập công cụ web flasher của tác giả: 👉 **[https://wazemod.io.vn/flash-firmware](https://wazemod.io.vn/flash-firmware)**
+4. Bấm **Kết nối**, chọn đúng cổng COM của mạch ESP32 CYD.
+5. Chọn file `.bin` đã tải, đảm bảo địa chỉ nạp là **`0x0`** và bấm **Flash** để hoàn tất.
 
-Firmware phát hành dùng quy tắc đặt tên:
+*(Mẹo: Nếu mạch không vào được chế độ flash, hãy nhấn giữ nút **BOOT**, bấm nhả nút **RESET**, sau đó thả nút **BOOT** rồi kết nối lại).*
 
-```text
-WazeHUD-<phiên-bản>-WazeMod-<phiên-bản>-<mạch>-<ngày-giờ>-Factory.bin
-WazeHUD-<phiên-bản>-WazeMod-<phiên-bản>-<mạch>-<ngày-giờ>-OTA.bin
+### 💻 Cách 2: Nạp qua dòng lệnh esptool (Dành cho Developer / Terminal)
+
 ```
-
-| File | Dùng khi nào | Offset |
-|---|---|---:|
-| `Factory.bin` | Cài mới, đổi partition hoặc khôi phục mạch | `0x0` |
-| `OTA.bin` | Chỉ cập nhật app khi mạch đã có đúng partition table | `0x20000` |
 
 > [!WARNING]
 > Không flash file OTA tại `0x0`. Nếu không chắc firmware cũ dùng partition nào, hãy dùng Factory BIN.
