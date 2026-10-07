@@ -57,6 +57,7 @@ void overspeedLedTask(void *) {
         const DeviceSettings settings = DeviceConfig::instance().snapshot();
         const int threshold = std::max(0, state.speedLimitKmh +
                                            static_cast<int>(settings.overspeedOffsetKmh));
+        const int effectiveSpeed = adjustedSpeed(state.speedKmh, settings);
         const bool overspeed = state.connected && state.hasProducerState &&
                                state.navigationActive && !state.signalStale &&
                                state.speedLimitKmh > 0 && effectiveSpeed > threshold;
