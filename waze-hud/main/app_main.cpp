@@ -59,7 +59,7 @@ void overspeedLedTask(void *) {
                                            static_cast<int>(settings.overspeedOffsetKmh));
         const bool overspeed = state.connected && state.hasProducerState &&
                                state.navigationActive && !state.signalStale &&
-                               state.speedLimitKmh > 0 && state.speedKmh > threshold;
+                               state.speedLimitKmh > 0 && effectiveSpeed > threshold;
         if (!state.connected) {
             const bool *color = palette[disconnectedPhase % 6];
             setRgbLed(color[0], color[1], color[2]);
