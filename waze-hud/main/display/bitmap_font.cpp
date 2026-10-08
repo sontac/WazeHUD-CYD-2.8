@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <cmath>
 
 namespace waze_hud {
 namespace {
@@ -250,6 +251,25 @@ void Canvas::fillCircle(int cx, int cy, int radius, uint16_t color) {
         int x = 0;
         while ((x + 1) * (x + 1) + y * y <= radius * radius) ++x;
         fillRect(cx - x, cy + y, 2 * x + 1, 1, color);
+    }
+}
+
+void Canvas::fillCircleAntiAliased(int cx, int cy, int radius, uint16_t color) {
+    const int minX = cx - radius - 1;
+    const int maxX = cx + radius + 1;
+    const int minY = cy - radius - 1;
+    const int maxY = cy + radius + 1;
+    const float r = static_cast<float>(radius);
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            const float dx = static_cast<float>(x) + 0.5f - static_cast<float>(cx);
+            const float dy = static_cast<float>(y) + 0.5f - static_cast<float>(cy);
+            const float distance = std::sqrt(dx * dx + dy * dy);
+            float coverage = r + 0.5f - distance;
+            if (coverage <= 0.0f) continue;
+            if (coverage > 1.0f) coverage = 1.0f;
+            alphaPixel(x, y, color, static_cast<uint8_t>(coverage * 255.0f + 0.5f));
+        }
     }
 }
 

@@ -11,10 +11,17 @@
 namespace waze_hud {
 
 enum class UiTheme : uint8_t { Auto, Day, Night };
-enum class SpeedDisplayMode : uint8_t { CurrentPrimary, LimitPrimary };
+enum class SpeedDisplayMode : uint8_t { CurrentPrimary, LimitPrimary, NoNavigation };
 
 struct DeviceSettings {
     uint8_t brightness{70};
+#if CONFIG_WAZE_HUD_DISPLAY_CYD_28
+    bool autoBrightness{false};
+    bool invertColor{true};
+    bool colorBgr{true};
+    uint8_t backlightPin{21};
+    bool overspeedBorder{true};
+#endif
     UiTheme theme{UiTheme::Auto};
     SpeedDisplayMode speedDisplayMode{SpeedDisplayMode::CurrentPrimary};
     bool showStreet{true};
@@ -27,6 +34,7 @@ struct DeviceSettings {
     int8_t offsetY{0};
     uint32_t revision{10};
 };
+
 inline int adjustedSpeed(int rawSpeed, const DeviceSettings &settings) {
     if (rawSpeed <= 0) return 0;
     if (settings.speedOffsetKmh != 0) {
@@ -38,6 +46,7 @@ inline int adjustedSpeed(int rawSpeed, const DeviceSettings &settings) {
     }
     return std::clamp(rawSpeed, 0, 999);
 }
+
 using HlpSendLine = void (*)(const char *line, void *context);
 
 class DeviceConfig {
