@@ -16,6 +16,7 @@
 #include "sdkconfig.h"
 #include "state/hud_state_store.h"
 #include "system/system_status.h"
+#include "touch_controller.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -342,6 +343,7 @@ extern "C" void app_main() {
     ESP_ERROR_CHECK(result);
     recordBootReason();
     ESP_ERROR_CHECK(DeviceConfig::instance().init());
+    startTouchController();  // XPT2046 double-tap cycles V1 -> V2 -> V3 -> V1
     ESP_ERROR_CHECK(HudStateStore::instance().init() ? ESP_OK : ESP_ERR_NO_MEM);
     const esp_err_t statusResult = SystemStatus::instance().init();
     if (statusResult != ESP_OK)

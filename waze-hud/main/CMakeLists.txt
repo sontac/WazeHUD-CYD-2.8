@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "app_main.cpp"
+        "touch_controller.cpp"
         "serial/serial_transport.cpp"
         "protocol/hlp_core.c"
         "protocol/hlp_protocol.cpp"

@@ -18,6 +18,7 @@ public:
     void line(int x0, int y0, int x1, int y1, uint16_t color, int thickness = 1);
     void circle(int centerX, int centerY, int radius, uint16_t color, int thickness = 1);
     void fillCircle(int centerX, int centerY, int radius, uint16_t color);
+    void fillCircleAntiAliased(int centerX, int centerY, int radius, uint16_t color);
     void triangle(int x0, int y0, int x1, int y1, int x2, int y2, uint16_t color);
     void alphaMask(int x, int y, const assets::AlphaMask &mask, uint16_t color);
     void colorBitmap(int x, int y, const assets::ColorBitmap &bitmap);

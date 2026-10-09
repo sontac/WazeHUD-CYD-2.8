@@ -15,7 +15,7 @@ public:
     esp_err_t init();
     void render(const HudState &state, const DeviceSettings &settings,
                 const SystemStatusSnapshot &systemStatus);
-    bool animationActive() const { return marqueeActive_ || clockActive_; }
+    bool animationActive() const { return marqueeActive_ || nextStreetMarqueeActive_ || clockActive_ || overspeedBorderActive_; }
 
 private:
     void renderRegion(const Rect &region, const HudState &state, const DeviceSettings &settings,
@@ -33,6 +33,15 @@ private:
     void renderAlerts(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
     void renderGuidance(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
     void renderStreet(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
+    void renderV1NextStreet(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
+    void renderV2NextStreet(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
+    void renderV2Maneuver(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
+    void renderV2SpeedCluster(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
+    void renderV2Alerts(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
+    void renderV2Guidance(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
+    void renderV2Street(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
+    void renderOverspeedBorder(const HudState &state, const DeviceSettings &settings, bool forceRedraw);
+    void drawBorderEdge(const Rect &edge, uint16_t color);
 
     uint16_t *buffer_{nullptr};
     HudState previous_{};
@@ -46,7 +55,15 @@ private:
     int marqueeTextWidth_{0};
     int marqueeAvailableWidth_{0};
     bool marqueeActive_{false};
+    uint64_t nextStreetMarqueeEpochMs_{0};
+    int nextStreetMarqueeOffset_{0};
+    int nextStreetMarqueeRenderedOffset_{-1};
+    int nextStreetMarqueeTextWidth_{0};
+    int nextStreetMarqueeAvailableWidth_{0};
+    bool nextStreetMarqueeActive_{false};
     bool clockActive_{false};
+    bool overspeedBorderActive_{false};
+    uint8_t previousBorderMask_{0};
     bool firstFrame_{true};
 };
 

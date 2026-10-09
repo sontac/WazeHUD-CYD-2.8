@@ -1,0 +1,19 @@
+WazeHUD CYD USB V1.0.1 + V15 UI/Double-Tap merge
+
+This source keeps the original USB/UART0 HLP transport from WazeHUD-CYD-USB-V1-v1.0.1.
+Merged from the working V15 Double Tap branch:
+- V1, V2 and V3 display modes
+- XPT2046 double-tap switching: V1 -> V2 -> V3 -> V1
+- Latest V15 UI/assets, including the white alert-distance text and existing traffic-light/overspeed UI
+- Persistent speed display mode through DeviceConfig/NVS
+
+Transport-specific files retained from the USB base:
+- main/serial/serial_transport.cpp/.h
+- USB-base main/protocol/hlp_protocol.cpp and HLP serial send/receive path
+- main/system/system_status.cpp/.h, with renderer status panel adapted to show USB (not BLE)
+
+Touch wiring for CYD 2.8 inch XPT2046:
+SCK=GPIO25, MOSI=GPIO32, MISO=GPIO39, CS=GPIO33, IRQ=GPIO36.
+LCD remains on the existing SPI2 pins configured by display_driver.
+
+Build/flash status: source-level merge only; this environment does not have the ESP-IDF build toolchain configured, so compile and hardware testing are still required.
