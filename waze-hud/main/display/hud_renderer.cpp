@@ -1468,18 +1468,50 @@ void HudRenderer::renderSystemStatus(Canvas &canvas, const Rect &region,
 
 void HudRenderer::renderStatus(Canvas &canvas, const Rect &region, const HudState &state, const DeviceSettings &settings) {
     canvas.clear(colors::Background);
-    canvas.colorBitmap(16 - region.x, screenY(25) - region.y, assets::kBootIcon);
-    constexpr int copyX = 120;
-    constexpr int copyWidth = 190;
-    canvas.fontText(copyX - region.x, screenY(34) - region.y, "WazeHUD", assets::kTextLarge,
-                    colors::Foreground, copyWidth, true);
-    const char *status = state.signalStale ? "Mất tín hiệu" : state.connected ? "Đã kết nối" : "Đang chờ thiết bị";
-    const uint16_t statusColor = state.signalStale ? colors::Amber : state.connected ? colors::Green : colors::Muted;
-    canvas.fontText(copyX - region.x, screenY(73) - region.y, status, assets::kTextMedium,
-                    statusColor, copyWidth, true);
-    const char *detail = state.signalStale ? "Đang đợi dữ liệu" : state.connected ? "Đang chờ WazeMod" : "Đang chờ kết nối";
-    canvas.fontText(copyX - region.x, screenY(103) - region.y, detail, assets::kTextSmall,
-                    foreground(settings), copyWidth, true);
+
+    // SPLASH FIX5: tighten logo-to-loader spacing, lift the status text,
+    // widen the road perspective, and show BLE branding only on this firmware.
+    const uint16_t cyan = colors::rgb565(0, 205, 240);
+    const uint16_t dimCyan = colors::rgb565(0, 105, 135);
+    const auto sx = [&](int x) { return x - region.x; };
+    const auto sy = [&](int y) { return screenY(y) - region.y; };
+    const auto line = [&](int x0, int y0, int x1, int y1, uint16_t color, int thickness = 1) {
+        canvas.line(sx(x0), sy(y0), sx(x1), sy(y1), color, thickness);
+    };
+
+    // Preserve the logo size and position confirmed on the real device.
+    canvas.colorBitmap(sx(10), sy(18), assets::kWazeHudSplashLogo);
+
+    // Bring the four loading dots closer to the logo.
+    const int dotY = 103;
+    const int dotXs[] = {128, 149, 170, 191};
+    for (int i = 0; i < 4; ++i) {
+        canvas.fillCircle(sx(dotXs[i]), sy(dotY), i == 0 ? 4 : 3, i == 0 ? cyan : dimCyan);
+    }
+
+    // Move the status line upward with the dots; no duplicated secondary line.
+    const char *status = state.signalStale ? "MẤT TÍN HIỆU" : state.connected ? "ĐÃ KẾT NỐI" : "ĐANG CHỜ KẾT NỐI";
+    const uint16_t statusColor = state.signalStale ? colors::Amber : state.connected ? colors::Green : colors::White;
+    canvas.fontText(sx(8), sy(113), status, assets::kTextMedium, statusColor, 304, true);
+
+    // Wider road perspective: separate the lane edges near the horizon.
+    line(0, 202, 132, 157, dimCyan, 1);
+    line(319, 202, 188, 157, dimCyan, 1);
+    line(0, 202, 132, 157, cyan, 2);
+    line(319, 202, 188, 157, cyan, 2);
+    line(132, 157, 188, 157, dimCyan, 1);
+    line(160, 161, 160, 166, dimCyan, 1);
+    line(160, 171, 160, 176, dimCyan, 1);
+    line(160, 181, 160, 186, dimCyan, 1);
+
+    // BLE-only identity for this BLE firmware: centered cyan Bluetooth rune.
+    const int bx = 160, by = 199;
+    line(bx, by - 13, bx, by + 13, cyan, 2);
+    line(bx, by - 13, bx + 9, by - 5, cyan, 2);
+    line(bx + 9, by - 5, bx - 8, by + 8, cyan, 2);
+    line(bx, by + 13, bx + 9, by + 5, cyan, 2);
+    line(bx + 9, by + 5, bx - 8, by - 8, cyan, 2);
+    canvas.fontText(sx(136), sy(216), "BLE", assets::kTextSmall, cyan, 48, true);
 }
 
 void HudRenderer::renderManeuver(Canvas &canvas, const HudState &state, const DeviceSettings &settings) {
