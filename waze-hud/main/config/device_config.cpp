@@ -234,6 +234,35 @@ esp_err_t DeviceConfig::toggleMirror() {
     return ESP_OK;
 }
 
+esp_err_t DeviceConfig::cycleSpeedDisplayMode() {
+    DeviceSettings candidate = snapshot();
+    switch (candidate.speedDisplayMode) {
+        case SpeedDisplayMode::CurrentPrimary:
+            candidate.speedDisplayMode = SpeedDisplayMode::LimitPrimary;
+            break;
+        case SpeedDisplayMode::LimitPrimary:
+            candidate.speedDisplayMode = SpeedDisplayMode::NoNavigation;
+            break;
+        case SpeedDisplayMode::NoNavigation:
+            candidate.speedDisplayMode = SpeedDisplayMode::CurrentPrimary;
+            break;
+    }
+    ++candidate.revision;
+    const esp_err_t saved = saveSettings(candidate);
+    if (saved != ESP_OK) {
+        ESP_LOGE(kTag, "Touch view change save failed: %s", esp_err_to_name(saved));
+        return saved;
+    }
+    taskENTER_CRITICAL(&lock_);
+    active_ = candidate;
+    taskEXIT_CRITICAL(&lock_);
+    ESP_LOGI(kTag, "Touch view changed to mode %u, revision %lu",
+             static_cast<unsigned>(candidate.speedDisplayMode),
+             static_cast<unsigned long>(candidate.revision));
+    HudStateStore::instance().refresh();
+    return ESP_OK;
+}
+
 void DeviceConfig::publishSchema(HlpSendLine send, void *context) {
     const DeviceSettings settings = snapshot();
     cJSON *root = envelope("cfg_begin");

@@ -57,6 +57,7 @@ public:
     DeviceSettings snapshot() const;
     esp_err_t toggleRotation();
     esp_err_t toggleMirror();
+    esp_err_t cycleSpeedDisplayMode();
     bool handleMessage(const cJSON *root, HlpSendLine send, void *context);
     void publishSchema(HlpSendLine send, void *context);
 

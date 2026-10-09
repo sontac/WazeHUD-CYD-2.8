@@ -2,6 +2,7 @@
 #include "config/device_config.h"
 #include "display/display_driver.h"
 #include "display/hud_renderer.h"
+#include "touch_controller.h"
 #include "sdkconfig.h"
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
 #include "esp_adc/adc_oneshot.h"
@@ -255,7 +256,10 @@ void uiTask(void *) {
     auto settings = DeviceConfig::instance().snapshot();
     if (lightAdc && settings.autoBrightness) settings.brightness = autoBrightness;
     uint8_t renderedBrightness = settings.brightness;
+#else
+    auto settings = DeviceConfig::instance().snapshot();
 #endif
+    uint32_t renderedSettingsRevision = settings.revision;
     HudState state = HudStateStore::instance().snapshot();
     const int64_t renderStartedUs = esp_timer_get_time();
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
@@ -265,6 +269,8 @@ void uiTask(void *) {
 #endif
     ESP_LOGI(kTag, "Initial UI frame rendered in %lld ms",
              static_cast<long long>((esp_timer_get_time() - renderStartedUs) / 1000));
+    // Touch diagnostic uses the CYD touch controller's separate SPI bus/pins.
+    startTouchController();
     for (;;) {
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
         const TickType_t timeout = renderer.animationActive() ? pdMS_TO_TICKS(80) : pdMS_TO_TICKS(1000);
@@ -282,14 +288,19 @@ void uiTask(void *) {
             }
         }
         if (lightAdc && settings.autoBrightness) settings.brightness = autoBrightness;
-        if (received || renderer.animationActive() || settings.brightness != renderedBrightness) {
+        if (received || renderer.animationActive() || settings.brightness != renderedBrightness ||
+            settings.revision != renderedSettingsRevision) {
             renderer.render(state, settings, SystemStatus::instance().snapshot());
             renderedBrightness = settings.brightness;
+            renderedSettingsRevision = settings.revision;
         }
 #else
         const TickType_t timeout = renderer.animationActive() ? pdMS_TO_TICKS(80) : portMAX_DELAY;
-        if (HudStateStore::instance().receive(state, timeout))
-            renderer.render(state, DeviceConfig::instance().snapshot(), SystemStatus::instance().snapshot());
+        const DeviceSettings nextSettings = DeviceConfig::instance().snapshot();
+        if (HudStateStore::instance().receive(state, timeout) || nextSettings.revision != renderedSettingsRevision) {
+            renderer.render(state, nextSettings, SystemStatus::instance().snapshot());
+            renderedSettingsRevision = nextSettings.revision;
+        }
         else if (renderer.animationActive())
             renderer.render(state, DeviceConfig::instance().snapshot(), SystemStatus::instance().snapshot());
 #endif
