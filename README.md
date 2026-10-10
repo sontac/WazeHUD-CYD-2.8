@@ -3,6 +3,9 @@
 
 Bắt đầu từ phiên bản này sẽ thay thế cho các phiên bản V1, V2 vì đã tích hợp vào 1 phiên bản này. Phiên bản này chỉ sử dụng giao thức BLE với 3 kiểu hiển thị giao diện. Chuyển đổi giữa các giao diện bằng cách ấn 2 lần trên màn hình hoặc lựa chọn giao diện trong app
 
+(./assets/demo/image_01.png)
+
+
 
 <img width="227" height="177" alt="20261009_234439_1" src="https://github.com/user-attachments/assets/cc8294b4-b711-449b-a542-44c1ef2b5afe" />
 
