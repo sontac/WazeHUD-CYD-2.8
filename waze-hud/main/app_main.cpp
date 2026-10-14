@@ -222,12 +222,19 @@ void uiTask(void *) {
     renderer.render(state, DeviceConfig::instance().snapshot(), SystemStatus::instance().snapshot());
     ESP_LOGI(kTag, "Initial UI frame rendered in %lld ms",
              static_cast<long long>((esp_timer_get_time() - renderStartedUs) / 1000));
+    uint32_t renderedSettingsRevision = DeviceConfig::instance().snapshot().revision;
     for (;;) {
-        const TickType_t timeout = renderer.animationActive() ? pdMS_TO_TICKS(80) : portMAX_DELAY;
-        if (HudStateStore::instance().receive(state, timeout))
-            renderer.render(state, DeviceConfig::instance().snapshot(), SystemStatus::instance().snapshot());
-        else if (renderer.animationActive())
-            renderer.render(state, DeviceConfig::instance().snapshot(), SystemStatus::instance().snapshot());
+        // Settings can arrive over USB without a new HUD-state frame. Poll at
+        // least once per second and compare the config revision so app changes
+        // (V1/V2/V3, backlight pin, rotation, GPS-related options, etc.) are
+        // applied immediately instead of waiting indefinitely for navigation data.
+        const TickType_t timeout = renderer.animationActive() ? pdMS_TO_TICKS(80) : pdMS_TO_TICKS(1000);
+        const bool received = HudStateStore::instance().receive(state, timeout);
+        const DeviceSettings settings = DeviceConfig::instance().snapshot();
+        if (received || renderer.animationActive() || settings.revision != renderedSettingsRevision) {
+            renderer.render(state, settings, SystemStatus::instance().snapshot());
+            renderedSettingsRevision = settings.revision;
+        }
     }
 }
 

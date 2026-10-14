@@ -17,3 +17,6 @@ SCK=GPIO25, MOSI=GPIO32, MISO=GPIO39, CS=GPIO33, IRQ=GPIO36.
 LCD remains on the existing SPI2 pins configured by display_driver.
 
 Build/flash status: source-level merge only; this environment does not have the ESP-IDF build toolchain configured, so compile and hardware testing are still required.
+
+
+TEST3 V1 merge: copied the confirmed BLE V1 speed positioning and V1 speed-limit sign rendering into USB. V3/V2 renderer and USB transport remain unchanged. Fixed fontText call arity to match bitmap_font.h.

@@ -78,7 +78,7 @@ constexpr Rect Street{0, MainHeight + GuidanceHeight, Width, StreetHeight};
 // intentionally uses a different vertical split.
 constexpr int V2MainHeight = 120;
 constexpr int V2GuidanceHeight = 65;
-constexpr int V2StreetHeight = 25;
+constexpr int V2StreetHeight = 30;
 constexpr int V1NextStreetHeight = 30;
 // V1: reserve the top 30px of all three main columns for the next-street header.
 // The V1 content regions are clipped to start at Y=30 while their existing
@@ -91,9 +91,12 @@ constexpr Rect V1SpeedCluster{80, V1NextStreetHeight, 160, MainHeight - V1NextSt
 constexpr Rect V2NextStreet{0, 0, Width, 30};
 constexpr Rect V2Maneuver{0, 30, 120, V2MainHeight};
 constexpr Rect V2SpeedCluster{120, 30, 200, V2MainHeight};
-constexpr Rect V2Alerts{240, 150, 80, 90};
-constexpr Rect V2Guidance{0, 150, 240, V2GuidanceHeight};
-constexpr Rect V2Street{0, 215, 240, V2StreetHeight};
+constexpr Rect V2Alerts{160, 150, 160, 90};
+constexpr Rect V2Guidance{0, 150, 160, 60};
+// V2 keeps its full-width street row. V3 has a separate 160px viewport so
+// the street marquee stops before the two warning cards on the right.
+constexpr Rect V2Street{0, 210, Width, V2StreetHeight};
+constexpr Rect V3Street{0, 210, 160, V2StreetHeight};
 #endif
 constexpr Rect Full{0, 0, Width, Height};
 
@@ -124,7 +127,7 @@ constexpr int BaseMaxRegionPixels = maxInt(
 constexpr int V2MaxRegionPixels = maxInt(
     maxInt(maxInt(maxInt(regionPixels(V1NextStreet), regionPixels(V1Maneuver)), regionPixels(V1Speed)), regionPixels(V1Limits)),
     maxInt(regionPixels(V2SpeedCluster),
-           maxInt(regionPixels(V2Guidance), maxInt(regionPixels(V2Street), regionPixels(V2Alerts)))));
+           maxInt(regionPixels(V2Guidance), maxInt(regionPixels(V2Street), maxInt(regionPixels(V3Street), regionPixels(V2Alerts))))));
 constexpr int MaxRegionPixels = maxInt(BaseMaxRegionPixels, V2MaxRegionPixels);
 #else
 constexpr int MaxRegionPixels = BaseMaxRegionPixels;
@@ -169,15 +172,21 @@ static_assert(physicalRect(V2Maneuver).y == 30 &&
               physicalRect(V2SpeedCluster).y == 30 &&
               physicalRect(V2SpeedCluster).height == V2MainHeight,
               "V2 main row geometry is invalid");
-static_assert(physicalRect(V2Guidance).y == 150 &&
-              physicalRect(V2Guidance).height == V2GuidanceHeight &&
+static_assert(physicalRect(V2Guidance).x == 0 &&
+              physicalRect(V2Guidance).y == 150 &&
+              physicalRect(V2Guidance).width == 160 &&
+              physicalRect(V2Guidance).height == 60 &&
+              physicalRect(V2Alerts).x == 160 &&
               physicalRect(V2Alerts).y == 150 &&
+              physicalRect(V2Alerts).width == 160 &&
               physicalRect(V2Alerts).height == 90,
               "V2 lower guidance/alert row geometry is invalid");
-static_assert(physicalRect(V2Street).y == 215 &&
+static_assert(physicalRect(V2Street).x == 0 &&
+              physicalRect(V2Street).y == 210 &&
+              physicalRect(V2Street).width == PhysicalWidth &&
               physicalRect(V2Street).height == V2StreetHeight &&
               physicalRect(V2Street).y + physicalRect(V2Street).height == PhysicalHeight,
-              "V2 street row must end exactly at the bottom of the framebuffer");
+              "V2 street row must span full width and end at framebuffer bottom");
 #endif
 static_assert(physicalRect(Maneuver).width + physicalRect(Speed).width +
               physicalRect(Limits).width + physicalRect(Alerts).width == PhysicalWidth,

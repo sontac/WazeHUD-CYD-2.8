@@ -2,12 +2,14 @@
 
 #include "serial/serial_transport.h"
 #include "config/device_config.h"
+#include "display/layout.h"
 #include "cJSON.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/task.h"
 #include "state/hud_state_store.h"
 #include <cstring>
+#include <cstdio>
 
 namespace waze_hud {
 namespace {
@@ -51,6 +53,7 @@ void HlpProtocol::run() {
                 decoder_.resetSession();
                 hlp_receiver_init(&receiver_, frameEntry, this);
                 sessionEstablished_ = false;
+                declarationSent_ = false;
                 lastPeerActivity_ = 0;
                 HudStateStore::instance().publish(HudState{});
             } else {
@@ -79,6 +82,7 @@ void HlpProtocol::run() {
             decoder_.resetSession();
             hlp_receiver_init(&receiver_, frameEntry, this);
             sessionEstablished_ = false;
+            declarationSent_ = false;
             lastPeerActivity_ = 0;
             HudStateStore::instance().publish(HudState{});
         }
@@ -101,6 +105,13 @@ void HlpProtocol::handleFrame(const char *line, size_t length) {
         ESP_LOGW(kTag, "Ignoring invalid/unsupported HLP envelope");
         cJSON_Delete(root);
         return;
+    }
+
+    // USB/UART has no BLE NotificationsEnabled event. Send the same HLP device
+    // capability declaration once the app starts an HLP exchange, so the producer
+    // can include optional fields such as "lan" in subsequent state frames.
+    if (!declarationSent_) {
+        declarationSent_ = sendDeviceDeclaration();
     }
 
     // Heartbeat takes precedence over all configuration, decoding, and UI work.
@@ -151,6 +162,29 @@ void HlpProtocol::handleFrame(const char *line, size_t length) {
     }
     if (changed) HudStateStore::instance().publish(state);
     cJSON_Delete(root);
+}
+
+bool HlpProtocol::sendDeviceDeclaration() {
+    char declaration[HLP_MAX_FRAME]{};
+    const int declarationLength = std::snprintf(declaration, sizeof(declaration),
+        "{\"v\":1,\"t\":\"dev\",\"name\":\"%s\",\"fw\":\"usb-v1.1.4-lane-fix1\","
+        "\"proto\":[1],\"disp\":{\"w\":%d,\"h\":%d,\"color\":1},"
+        "\"can\":[\"speed\",\"limit\",\"turn\",\"lanes\",\"street\",\"eta\",\"avgzone\",\"alerts\"],"
+        "\"want\":{\"rate\":4,\"fields\":[\"nav\",\"spd\",\"lim\",\"min\",\"over\",\"trn\",\"trn2\","
+        "\"dst\",\"exit\",\"lan\",\"st\",\"st2\",\"eta\",\"rmin\",\"rm\",\"rkm\",\"avg\",\"avgL\",\"avgR\","
+        "\"avgP\",\"alr\",\"alrD\",\"alrV\",\"alrS\",\"alrM\",\"alrs\"]},\"transport\":\"usb\"}",
+        layout::DeviceName, layout::PhysicalWidth, layout::PhysicalHeight);
+    if (declarationLength <= 0 || declarationLength >= static_cast<int>(sizeof(declaration))) {
+        ESP_LOGE(kTag, "USB HLP dev declaration overflow");
+        return false;
+    }
+    const esp_err_t result = SerialTransport::instance().sendLine(declaration);
+    if (result == ESP_OK) {
+        ESP_LOGI(kTag, "Sent USB HLP dev declaration requesting 4 Hz, including field lan");
+        return true;
+    }
+    ESP_LOGW(kTag, "USB HLP dev declaration send failed: %s", esp_err_to_name(result));
+    return false;
 }
 
 }  // namespace waze_hud
