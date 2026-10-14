@@ -359,7 +359,7 @@ int Canvas::fontTextWidth(const char *utf8, const assets::BitmapFont &font) cons
 }
 
 void Canvas::fontText(int x, int y, const char *utf8, const assets::BitmapFont &font,
-                      uint16_t color, int maxWidth, bool centered) {
+                      uint16_t color, int maxWidth, bool centered, bool crispTopEdge) {
     if (!utf8 || !font.glyphs || !font.bitmap4bpp) return;
     std::array<uint32_t, 64> codepoints{};
     std::size_t count = 0;
@@ -392,9 +392,13 @@ void Canvas::fontText(int x, int y, const char *utf8, const assets::BitmapFont &
         for (std::size_t pixelIndex = 0; pixelIndex < pixelCount; ++pixelIndex) {
             const uint8_t packed = font.bitmap4bpp[glyph->bitmapOffset + pixelIndex / 2U];
             const uint8_t nibble = (pixelIndex & 1U) == 0 ? packed >> 4U : packed & 0x0FU;
-            if (nibble != 0) {
-                const int column = static_cast<int>(pixelIndex % glyph->width);
-                const int row = static_cast<int>(pixelIndex / glyph->width);
+            const int column = static_cast<int>(pixelIndex % glyph->width);
+            const int row = static_cast<int>(pixelIndex / glyph->width);
+            // Optional V3 speed treatment: suppress only very faint antialias
+            // pixels on the glyph's topmost row, which can look like a stray
+            // horizontal hairline on the small CYD panel. Keep the rest of the
+            // glyph's 4bpp antialiasing unchanged.
+            if (nibble != 0 && !(crispTopEdge && row == 0 && nibble < 8)) {
                 alphaPixel(x + glyph->xOffset + column, y + glyph->yOffset + row,
                            color, static_cast<uint8_t>(nibble * 17U));
             }
@@ -404,6 +408,62 @@ void Canvas::fontText(int x, int y, const char *utf8, const assets::BitmapFont &
 
     for (std::size_t index = 0; index < visible; ++index) drawCodepoint(codepoints[index]);
     if (ellipsis) for (int index = 0; index < 3; ++index) drawCodepoint('.');
+}
+
+
+void Canvas::fontTextScaled(int x, int y, const char *utf8, const assets::BitmapFont &font,
+                            uint16_t color, int maxWidth, bool centered, int scalePercent,
+                            bool crispTopEdge) {
+    if (!utf8 || !font.glyphs || !font.bitmap4bpp || scalePercent <= 0) return;
+    std::array<uint32_t, 64> codepoints{};
+    std::size_t count = 0;
+    const char *cursor = utf8;
+    while (*cursor && count < codepoints.size()) codepoints[count++] = nextCodepoint(cursor);
+
+    auto scaled = [scalePercent](int value) { return (value * scalePercent + 50) / 100; };
+    int drawnWidth = 0;
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto *glyph = fontGlyph(font, codepoints[i]);
+        if (glyph) drawnWidth += scaled(glyph->advance);
+    }
+    std::size_t visible = count;
+    bool ellipsis = false;
+    if (maxWidth > 0 && drawnWidth > maxWidth) {
+        // Keep whole digits only; do not replace a speed reading with ellipses.
+        visible = 0;
+        drawnWidth = 0;
+        for (; visible < count; ++visible) {
+            const auto *glyph = fontGlyph(font, codepoints[visible]);
+            const int nextWidth = glyph ? scaled(glyph->advance) : 0;
+            if (drawnWidth + nextWidth > maxWidth) break;
+            drawnWidth += nextWidth;
+        }
+    }
+    if (centered && maxWidth > 0) x += (maxWidth - drawnWidth) / 2;
+
+    auto drawCodepoint = [&](uint32_t codepoint) {
+        const auto *glyph = fontGlyph(font, codepoint);
+        if (!glyph) return;
+        const int outWidth = std::max(1, scaled(glyph->width));
+        const int outHeight = std::max(1, scaled(glyph->height));
+        for (int row = 0; row < outHeight; ++row) {
+            const int srcRow = std::min(glyph->height - 1, (row * 100) / scalePercent);
+            for (int column = 0; column < outWidth; ++column) {
+                const int srcColumn = std::min(glyph->width - 1, (column * 100) / scalePercent);
+                const std::size_t pixelIndex = static_cast<std::size_t>(srcRow) * glyph->width + srcColumn;
+                const uint8_t packed = font.bitmap4bpp[glyph->bitmapOffset + pixelIndex / 2U];
+                const uint8_t nibble = (pixelIndex & 1U) == 0 ? packed >> 4U : packed & 0x0FU;
+                if (nibble != 0 && !(crispTopEdge && srcRow == 0 && nibble < 8)) {
+                    alphaPixel(x + scaled(glyph->xOffset) + column,
+                               y + scaled(glyph->yOffset) + row,
+                               color, static_cast<uint8_t>(nibble * 17U));
+                }
+            }
+        }
+        x += scaled(glyph->advance);
+    };
+    for (std::size_t i = 0; i < visible; ++i) drawCodepoint(codepoints[i]);
+    if (ellipsis) for (int i = 0; i < 3; ++i) drawCodepoint('.');
 }
 
 int Canvas::textWidth(const char *utf8, int scale, int maxCells) const {

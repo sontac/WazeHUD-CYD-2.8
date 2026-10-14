@@ -28,7 +28,11 @@ public:
               int maxWidth = -1, bool centered = false);
     int fontTextWidth(const char *utf8, const assets::BitmapFont &font) const;
     void fontText(int x, int y, const char *utf8, const assets::BitmapFont &font,
-                  uint16_t color, int maxWidth = -1, bool centered = false);
+                  uint16_t color, int maxWidth = -1, bool centered = false,
+                  bool crispTopEdge = false);
+    void fontTextScaled(int x, int y, const char *utf8, const assets::BitmapFont &font,
+                        uint16_t color, int maxWidth, bool centered, int scalePercent,
+                        bool crispTopEdge = false);
 
     int width() const { return width_; }
     int height() const { return height_; }
