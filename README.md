@@ -7,7 +7,7 @@ Bắt đầu từ phiên bản này sẽ thay thế cho các phiên bản V1, V2
 <img width="227" height="177" alt="20261009_234439_1" src="./pictrue/Logo_boot.jpg" />
 
 
-<img width="227" height="177" alt="20261009_234439_1" src="https://sontac.github.io/WazeHUD-Webside/assets/images/HubV3-lich.jpg" />
+<img width="227" height="177" alt="20261009_234439_1" src="./pictrue/HubV3-lich.jpg" />
 
 <img width="227" height="177" alt="20261009_234439_2" src="https://sontac.github.io/WazeHUD-Webside/assets/images/HubV3-dd.jpg" />
 
