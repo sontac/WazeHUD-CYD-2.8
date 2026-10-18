@@ -16,6 +16,7 @@
 #include "sdkconfig.h"
 #include "state/hud_state_store.h"
 #include "system/system_status.h"
+#include "system/time_sync.h"
 #include "touch_controller.h"
 #include <algorithm>
 #include <cstdio>
@@ -352,6 +353,9 @@ extern "C" void app_main() {
     ESP_ERROR_CHECK(DeviceConfig::instance().init());
     startTouchController();  // XPT2046 double-tap cycles V1 -> V2 -> V3 -> V1
     ESP_ERROR_CHECK(HudStateStore::instance().init() ? ESP_OK : ESP_ERR_NO_MEM);
+    const esp_err_t timeResult = startTimeSync();
+    if (timeResult != ESP_OK)
+        ESP_LOGW(kTag, "Time sync startup failed: %s", esp_err_to_name(timeResult));
     const esp_err_t statusResult = SystemStatus::instance().init();
     if (statusResult != ESP_OK)
         ESP_LOGW("APP", "Battery status unavailable: %s", esp_err_to_name(statusResult));

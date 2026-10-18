@@ -6,7 +6,9 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 
 namespace waze_hud {
 namespace {
@@ -21,11 +23,23 @@ constexpr gpio_num_t kTouchCs   = GPIO_NUM_33;
 constexpr gpio_num_t kTouchIrq  = GPIO_NUM_36;
 constexpr spi_host_device_t kTouchHost = SPI3_HOST;
 
-// Two distinct taps must occur within this interval.
+// Gesture tuning: vertical swipes work anywhere on the screen.
+// A swipe segment of kSwipeThresholdRaw changes brightness by 10%; longer
+// swipes apply multiple 10% steps in one gesture.
 constexpr TickType_t kDoubleTapWindow = pdMS_TO_TICKS(350);
-constexpr TickType_t kDebounceDelay = pdMS_TO_TICKS(35);
-constexpr TickType_t kPollDelay = pdMS_TO_TICKS(20);
+constexpr TickType_t kDebounceDelay = pdMS_TO_TICKS(25);
+constexpr TickType_t kPollDelay = pdMS_TO_TICKS(8);
 constexpr int kMinPressure = 40;
+constexpr int kSwipeThresholdRaw = 120;
+constexpr int kBrightnessStepPercent = 10;
+// The supplied hardware logs show physical vertical swipes changing raw X
+// much more than raw Y. Select the dominant raw axis instead of switching to Y
+// merely because its movement crosses the threshold. Raw X direction is
+// inverted relative to the desired screen gesture direction on this device.
+constexpr bool kRawYIncreasesDownward = true;
+constexpr bool kRawXIncreasesDownward = false;
+constexpr int kEndpointSamples = 5;
+constexpr int kMaxBrightnessSegmentsPerSwipe = 3;
 
 spi_device_handle_t s_dev = nullptr;
 
@@ -41,13 +55,18 @@ uint16_t read12(uint8_t command) {
     return static_cast<uint16_t>((static_cast<uint16_t>(rx[1]) << 8 | rx[2]) >> 3);
 }
 
-bool readTouchSample() {
+bool readTouchSample(uint16_t *xOut = nullptr, uint16_t *yOut = nullptr) {
     if (gpio_get_level(kTouchIrq) != 0) return false;
     const uint16_t x = read12(0xD0);
     const uint16_t y = read12(0x90);
     const uint16_t z1 = read12(0xB0);
     (void)read12(0xC0);  // z2 is not needed; IRQ + z1 are sufficient here.
-    return z1 > kMinPressure && x > 20 && x < 4070 && y > 20 && y < 4070;
+    const bool valid = z1 > kMinPressure && x > 20 && x < 4070 && y > 20 && y < 4070;
+    if (valid) {
+        if (xOut) *xOut = x;
+        if (yOut) *yOut = y;
+    }
+    return valid;
 }
 
 void waitForRelease() {
@@ -62,12 +81,102 @@ void waitForRelease() {
     }
 }
 
+uint16_t medianSamples(uint16_t *values, int count) {
+    if (count <= 0) return 0;
+    for (int i = 1; i < count; ++i) {
+        const uint16_t value = values[i];
+        int j = i - 1;
+        while (j >= 0 && values[j] > value) {
+            values[j + 1] = values[j];
+            --j;
+        }
+        values[j + 1] = value;
+    }
+    return values[count / 2];
+}
+
+// Finger is already down. Use medians of several first/last samples rather
+// than a single noisy ADC reading. For diagonal swipes, direction is determined
+// by vertical movement (raw Y) only; horizontal movement is intentionally ignored.
+// Track both raw axes. Use the first press sample as the start point and a
+// median of the final samples as the endpoint, avoiding a moving "start" window
+// that can swallow most of a straight swipe.
+void captureGesture(uint16_t initialX, uint16_t initialY,
+                    uint16_t &endX, uint16_t &endY) {
+    uint16_t lastX[kEndpointSamples] = {};
+    uint16_t lastY[kEndpointSamples] = {};
+    int count = 0;
+    lastX[count] = initialX;
+    lastY[count] = initialY;
+    ++count;
+
+    while (gpio_get_level(kTouchIrq) == 0) {
+        uint16_t x = 0, y = 0;
+        if (readTouchSample(&x, &y)) {
+            if (count < kEndpointSamples) {
+                lastX[count] = x;
+                lastY[count] = y;
+                ++count;
+            } else {
+                for (int i = 1; i < kEndpointSamples; ++i) {
+                    lastX[i - 1] = lastX[i];
+                    lastY[i - 1] = lastY[i];
+                }
+                lastX[kEndpointSamples - 1] = x;
+                lastY[kEndpointSamples - 1] = y;
+            }
+        }
+        vTaskDelay(kPollDelay);
+    }
+    waitForRelease();
+
+    endX = medianSamples(lastX, count);
+    endY = medianSamples(lastY, count);
+}
+
 bool waitForPressUntil(TickType_t deadline) {
     while (xTaskGetTickCount() < deadline) {
         if (readTouchSample()) return true;
         vTaskDelay(kPollDelay);
     }
     return false;
+}
+
+bool handleVerticalSwipe(uint16_t startX, uint16_t startY,
+                        uint16_t endX, uint16_t endY) {
+    const int deltaX = static_cast<int>(endX) - static_cast<int>(startX);
+    const int deltaY = static_cast<int>(endY) - static_cast<int>(startY);
+    const int absX = std::abs(deltaX);
+    const int absY = std::abs(deltaY);
+
+    // Pick the axis with the larger displacement. The device logs show that
+    // a vertical swipe can produce a small but >threshold deltaY, so a simple
+    // "Y crossed threshold" test can incorrectly select Y over a much larger X.
+    const bool useXAxis = absX >= absY;
+    const int delta = useXAxis ? deltaX : deltaY;
+    const int distance = std::abs(delta);
+    if (distance < kSwipeThresholdRaw) {
+        ESP_LOGD(kTag, "No swipe: dx=%d dy=%d", deltaX, deltaY);
+        return false;
+    }
+
+    const bool increasesDownward = useXAxis
+        ? kRawXIncreasesDownward : kRawYIncreasesDownward;
+    const bool movedDown = increasesDownward ? delta > 0 : delta < 0;
+    const int detectedSegments = std::max(1, distance / kSwipeThresholdRaw);
+    const int segments = std::min(detectedSegments, kMaxBrightnessSegmentsPerSwipe);
+    const int magnitude = segments * kBrightnessStepPercent;
+    const int adjustment = movedDown ? -magnitude : magnitude;
+    const esp_err_t result = DeviceConfig::instance().adjustBrightness(adjustment);
+    if (result != ESP_OK) {
+        ESP_LOGE(kTag, "Swipe brightness change failed: %s", esp_err_to_name(result));
+    } else {
+        const DeviceSettings settings = DeviceConfig::instance().snapshot();
+        ESP_LOGI(kTag, "SWIPE %s axis=%c dx=%d dy=%d segments=%d -> brightness %u%%",
+                 movedDown ? "DOWN" : "UP", useXAxis ? 'X' : 'Y',
+                 deltaX, deltaY, segments, settings.brightness);
+    }
+    return true;
 }
 
 void handleDoubleTap() {
@@ -88,32 +197,32 @@ void handleDoubleTap() {
 }
 
 void touchTask(void *) {
-    ESP_LOGI(kTag, "Touch controller active: double-tap cycles V1 -> V2 -> V3 -> V1");
+    ESP_LOGI(kTag, "Touch active: vertical swipe adjusts brightness; double-tap cycles V1/V2/V3");
     ESP_LOGI(kTag, "XPT2046 SPI3: SCK=25 MOSI=32 MISO=39 CS=33 IRQ=36");
 
     for (;;) {
-        if (!readTouchSample()) {
+        uint16_t startX = 0, startY = 0;
+        if (!readTouchSample(&startX, &startY)) {
             vTaskDelay(kPollDelay);
             continue;
         }
 
-        // First tap: wait until the finger/stylus is released before looking
-        // for the second tap. Holding the screen therefore cannot generate
-        // repeated view changes.
-        vTaskDelay(kDebounceDelay);
-        waitForRelease();
-
-        const TickType_t secondTapDeadline = xTaskGetTickCount() + kDoubleTapWindow;
-        if (!waitForPressUntil(secondTapDeadline)) {
-            continue;  // Single tap: intentionally ignored.
+        // Capture both raw axes so straight vertical gestures also work on
+        // panels whose X/Y axes are rotated relative to the display.
+        uint16_t endX = startX;
+        uint16_t endY = startY;
+        captureGesture(startX, startY, endX, endY);
+        if (handleVerticalSwipe(startX, startY, endX, endY)) {
+            vTaskDelay(pdMS_TO_TICKS(80));
+            continue;
         }
 
+        // A short tap is eligible for the existing double-tap view switch.
+        const TickType_t secondTapDeadline = xTaskGetTickCount() + kDoubleTapWindow;
+        if (!waitForPressUntil(secondTapDeadline)) continue;
         vTaskDelay(kDebounceDelay);
         waitForRelease();
         handleDoubleTap();
-
-        // Small post-release guard prevents one physical double tap from
-        // being interpreted as another tap because of contact bounce.
         vTaskDelay(pdMS_TO_TICKS(80));
     }
 }

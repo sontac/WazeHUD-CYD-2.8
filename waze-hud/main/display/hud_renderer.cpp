@@ -2,12 +2,14 @@
 
 #include "display/colors.h"
 #include "display/display_driver.h"
+#include "system/vietnamese_calendar.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 
 namespace waze_hud {
 namespace {
@@ -54,6 +56,16 @@ bool alertsChanged(const HudState &a, const HudState &b) {
 }
 
 bool guidanceChanged(const HudState &a, const HudState &b) {
+    // Navigation start/stop must invalidate the guidance panel even when ETA,
+    // distance, lane count and alerts happen to remain unchanged. Otherwise
+    // the V1/V2 no-navigation calendar can remain hidden behind stale guidance.
+    if (a.navigationActive != b.navigationActive) {
+        ESP_LOGI(kTag, "Navigation state changed: %d -> %d, laneCount=%u",
+                 static_cast<int>(b.navigationActive),
+                 static_cast<int>(a.navigationActive),
+                 static_cast<unsigned>(a.laneCount));
+        return true;
+    }
     if (!sameText(a.eta, b.eta) ||
         a.remainingMeters != b.remainingMeters ||
         a.remainingMinutes != b.remainingMinutes ||
@@ -108,6 +120,108 @@ int64_t localClockMillis(const HudState &state) {
         ? nowMs - state.clockSyncMonotonicMs : 0U;
     return state.clockUnixSeconds * 1000LL + static_cast<int64_t>(elapsedMs) +
            static_cast<int64_t>(state.timezoneOffsetMinutes) * 60000LL;
+}
+
+
+int64_t calendarLocalUnixSeconds(const HudState &state) {
+    const int64_t producerMillis = localClockMillis(state);
+    if (producerMillis != INT64_MIN) return producerMillis / 1000LL;
+    const std::time_t now = std::time(nullptr);
+    // time() returns UTC epoch seconds; add Vietnam's UTC+7 offset for calendar conversion.
+    if (now < 1577836800) return 0;
+    return static_cast<int64_t>(now) + 7LL * 3600LL;
+}
+
+const char *weekdayFullVietnamese(int weekday) {
+    static constexpr const char *names[] = {"CHỦ NHẬT", "THỨ HAI", "THỨ BA", "THỨ TƯ", "THỨ NĂM", "THỨ SÁU", "THỨ BẢY"};
+    return weekday >= 0 && weekday < 7 ? names[weekday] : "--";
+}
+
+void drawV3Calendar(Canvas &canvas, const HudState &state) {
+    VietnameseCalendarInfo info{};
+    const int64_t localSeconds = calendarLocalUnixSeconds(state);
+    // Keep weekday and date prominent inside the 120x120 V3 panel.
+    constexpr int kPanelWidth = 120;
+    // Move the complete calendar block down slightly within the V3 panel.
+    const int weekdayY = 8;
+    const int solarY = 36;
+    const int lunarY = 64;
+    const int canChiY = 91;
+    const uint16_t weekdayColor = colors::rgb565(80, 255, 120);
+    if (!getVietnameseCalendarInfo(localSeconds, &info)) {
+        canvas.fontText(0, weekdayY, "ĐANG ĐỒNG BỘ", assets::kTextSmall,
+                        weekdayColor, kPanelWidth, true);
+        return;
+    }
+    char solar[12] = {};
+    char lunar[16] = {};
+    std::snprintf(solar, sizeof(solar), "%02d/%02d/%04d",
+                  info.solarDay, info.solarMonth, info.solarYear);
+    std::snprintf(lunar, sizeof(lunar), "%02d/%02d %s", info.lunarDay, info.lunarMonth,
+                  info.lunarLeap ? "NH" : "ÂL");
+    canvas.fontText(0, weekdayY, weekdayFullVietnamese(info.weekday),
+                    assets::kTextMedium, weekdayColor, kPanelWidth, true);
+    canvas.fontText(0, solarY, solar, assets::kTextMedium, colors::White, kPanelWidth, true);
+    canvas.fontText(0, lunarY, lunar, assets::kTextMedium, colors::White, kPanelWidth, true);
+    canvas.fontText(0, canChiY, info.canChiYear, assets::kTextSmall, colors::White, kPanelWidth, true);
+}
+
+
+// Compact calendar for V1/V2 when navigation is inactive. The clock occupies
+// the former ETA column; the right-hand lane-guidance area is reused for the
+// weekday + solar date and the lunar day/month. Keep this separate from V3.
+void drawV1V2NoNavigationCalendar(Canvas &canvas, const HudState &state,
+                                  int x, int width) {
+    VietnameseCalendarInfo info{};
+    const int64_t localSeconds = calendarLocalUnixSeconds(state);
+    const uint16_t weekdayColor = colors::rgb565(80, 255, 120);
+    constexpr int weekdayY = 7;
+    constexpr int lunarY = 29;
+
+    if (!getVietnameseCalendarInfo(localSeconds, &info)) {
+        canvas.fontText(x, 15, "ĐANG ĐỒNG BỘ", assets::kTextSmall,
+                        weekdayColor, width, true);
+        return;
+    }
+
+    char solar[12] = {};
+    char lunar[16] = {};
+    std::snprintf(solar, sizeof(solar), "%02d/%02d/%04d",
+                  info.solarDay, info.solarMonth, info.solarYear);
+    std::snprintf(lunar, sizeof(lunar), "%02d/%02d %s",
+                  info.lunarDay, info.lunarMonth, info.lunarLeap ? "NH" : "ÂL");
+
+    const char *weekday = weekdayFullVietnamese(info.weekday);
+    const int weekdayWidth = canvas.fontTextWidth(weekday, assets::kTextMedium);
+    const int solarWidth = canvas.fontTextWidth(solar, assets::kTextMedium);
+    constexpr int gap = 5;
+    const int combinedWidth = weekdayWidth + gap + solarWidth;
+    const int startX = x + std::max(0, (width - combinedWidth) / 2);
+
+    canvas.fontText(startX, weekdayY, weekday, assets::kTextMedium,
+                    weekdayColor, weekdayWidth, false);
+    canvas.fontText(startX + weekdayWidth + gap, weekdayY, solar,
+                    assets::kTextMedium, colors::White, solarWidth, false);
+    canvas.fontText(x, lunarY, lunar, assets::kTextMedium,
+                    colors::White, width, true);
+}
+
+void drawCompactClock(Canvas &canvas, const HudState &state, int width, int height) {
+    const int64_t clockMillis = localClockMillis(state);
+    if (!state.connected || !state.hasProducerState || clockMillis == INT64_MIN) {
+        canvas.fontText(0, std::max(0, (height - assets::kTextMedium.lineHeight) / 2),
+                        "--:--", assets::kTextMedium, colors::White, width, true);
+        return;
+    }
+
+    const int64_t totalMinutes = clockMillis / 60000LL;
+    const int normalizedMinutes = static_cast<int>((totalMinutes % 1440 + 1440) % 1440);
+    char clock[8] = {};
+    const char separator = (clockMillis % 1000LL) < 500LL ? ':' : ' ';
+    std::snprintf(clock, sizeof(clock), "%02d%c%02d",
+                  normalizedMinutes / 60, separator, normalizedMinutes % 60);
+    const int textY = std::max(0, (height - assets::kTextMedium.lineHeight) / 2);
+    canvas.fontText(0, textY, clock, assets::kTextMedium, colors::White, width, true);
 }
 
 const char *displayStreet(const HudState &state) {
@@ -796,7 +910,8 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
         }
     };
     if (systemStatus.visible) {
-        if (systemStatusChanged || configChanged) {
+        if (systemStatusChanged || configChanged ||
+            guidanceChanged(state, previous_)) {
             renderRegion(layout::Maneuver,state,settings,systemStatus);
             renderSpeedArea();
             renderRegion(layout::Alerts,state,settings,systemStatus);
@@ -854,7 +969,10 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
         }
         const bool changedAlerts = alertsChanged(state, previous_);
         if (changedAlerts) renderRegion(layout::Alerts,state,settings,systemStatus);
-        if (guidanceChanged(state, previous_))
+        if (guidanceChanged(state, previous_) ||
+            (!state.navigationActive &&
+             (currentClockMinute != renderedClockMinute_ ||
+              currentClockPhase != renderedClockPhase_)))
             renderRegion(layout::Guidance,state,settings,systemStatus);
         if (streetChanged ||
             settings.showStreet != previousSettings_.showStreet ||
@@ -994,16 +1112,18 @@ void HudRenderer::renderV2NextStreet(Canvas &canvas, const HudState &state,
         canvas.fontText(4, textY, state.nextStreet.data(), assets::kTextMedium,
                         foreground(settings), etaX - 8, false);
     }
-    char etaDistance[24] = {};
-    if (state.remainingMeters > 0) {
-        char distance[16] = {};
-        formatDistance(state.remainingMeters, distance, sizeof(distance));
-        std::snprintf(etaDistance, sizeof(etaDistance), "ETA: %s", distance);
-    } else {
-        std::snprintf(etaDistance, sizeof(etaDistance), "ETA: --");
+    if (state.navigationActive) {
+        char etaDistance[24] = {};
+        if (state.remainingMeters > 0) {
+            char distance[16] = {};
+            formatDistance(state.remainingMeters, distance, sizeof(distance));
+            std::snprintf(etaDistance, sizeof(etaDistance), "ETA: %s", distance);
+        } else {
+            std::snprintf(etaDistance, sizeof(etaDistance), "ETA: --");
+        }
+        canvas.fontText(etaX, textY, etaDistance, assets::kTextMedium,
+                        colors::White, etaWidth, true);
     }
-    canvas.fontText(etaX, textY, etaDistance, assets::kTextMedium,
-                    colors::White, etaWidth, true);
 #else
     canvas.clear(colors::Panel);
 #endif
@@ -1013,6 +1133,12 @@ void HudRenderer::renderV2Maneuver(Canvas &canvas, const HudState &state, const 
     canvas.clear(colors::Panel);
     const uint16_t fg = foreground(settings);
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
+    // V3 only: when navigation is inactive, reuse the next-turn panel for the calendar.
+    // When navigation is active, the original maneuver icon and distance path below is untouched.
+    if (settings.speedDisplayMode == SpeedDisplayMode::NoNavigation && !state.navigationActive) {
+        drawV3Calendar(canvas, state);
+        return;
+    }
     // UI NEW-07: move the maneuver icon upward and give the distance a larger
     // native bitmap font. No bitmap scaling is used, so the digits stay crisp.
     // V3 UI TEST3: shift the entire maneuver indicator slightly left.
@@ -1051,7 +1177,7 @@ void HudRenderer::renderV2SpeedCluster(Canvas &canvas, const HudState &state,
     const assets::BitmapFont &speedFont = isV3 ? assets::kNumberLarge : assets::kNumberSpeed;
     const int speedX = -22; // Keep the readout aligned with the established V3 cluster.
     // Keep the V3 readout at the lowered position confirmed in TEST1/TEST2.
-    const int speedY = isV3 ? 25 : 21;
+    const int speedY = isV3 ? 29 : 21;
     canvas.fontText(speedX, speedY, speed, speedFont, speedColor, 108, true);
     canvas.fontText(-22, isV3 ? 82 : 78, "km/h", assets::kTextMedium, colors::Muted, 108, true);
 
@@ -1144,17 +1270,22 @@ void HudRenderer::renderV2Alerts(Canvas &canvas, const HudState &state, const De
     }
 
     const AlertState warnings[2] = {warning1, warning2};
-    // TEST4: raise both warning icons and distance labels slightly so the
-    // distance text baseline aligns with the street-name row below.
-    const int centers[2] = {50, 112};
+    // Final spacing: warning 1 moves another 6 px left; warning 2 moves
+    // another 3 px left. Keep distance labels centered on their own icons.
+    // Widen warning 1's label to prevent long distances from becoming "...";
+    // keep warning 2 inside the panel edge to avoid the overspeed border.
+    const int centers[2] = {66, 130};
+    const int labelWidths[2] = {60, 54};
     for (int index = 0; index < 2; ++index) {
         const AlertState &warning = warnings[index];
         if (warning.kind == AlertKind::None) continue;
         drawAlertIcon(canvas, centers[index], 45, 17, warning, true);
         char distance[16] = {};
         formatDistance(targetDistanceM(warning.distanceM), distance, sizeof(distance));
-        canvas.fontText(centers[index] - 31, 64, distance, assets::kTextMedium,
-                        alertDistanceColor(warning.distanceM, foreground(settings)), 62, true);
+        const int labelWidth = labelWidths[index];
+        canvas.fontText(centers[index] - labelWidth / 2, 64, distance, assets::kTextMedium,
+                        alertDistanceColor(warning.distanceM, foreground(settings)),
+                        labelWidth, true);
         if (warning.kind == AlertKind::TrafficJam) {
             canvas.fontText(centers[index] - 31, 75,
                             trafficSeverityLabel(warning.trafficSeverity), assets::kTextSmall,
@@ -1750,6 +1881,14 @@ void HudRenderer::renderGuidance(Canvas &canvas, const HudState &state,
 
     canvas.fillRect(0, 0, layout::Width, 1, colors::Muted);
     canvas.fillRect(etaWidth - 1, 4, 1, layout::GuidanceHeight - 8, colors::Muted);
+
+    if (!state.navigationActive) {
+        // No navigation: leave the former ETA/clock area empty and keep
+        // the compact Vietnamese solar/lunar calendar on the right.
+        drawV1V2NoNavigationCalendar(canvas, state, laneLeft + 2,
+                                     laneRight - laneLeft - 4);
+        return;
+    }
 
     if (state.eta[0] != 0) {
         canvas.fontText(0, 2, "ETA", assets::kTextSmall, colors::Muted, etaWidth - 2, true);

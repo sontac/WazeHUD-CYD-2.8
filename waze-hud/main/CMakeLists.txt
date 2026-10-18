@@ -13,8 +13,10 @@ idf_component_register(
         "assets/generated_assets.cpp"
         "config/device_config.cpp"
         "system/system_status.cpp"
+        "system/time_sync.cpp"
+        "system/vietnamese_calendar.cpp"
     INCLUDE_DIRS "."
-    REQUIRES esp_adc esp_lcd esp_driver_gpio esp_driver_ledc esp_driver_spi esp_driver_uart esp_hw_support esp_timer nvs_flash json
+    REQUIRES esp_adc esp_lcd esp_driver_gpio esp_driver_ledc esp_driver_spi esp_driver_uart esp_hw_support esp_timer nvs_flash json esp_wifi esp_event esp_netif lwip
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE

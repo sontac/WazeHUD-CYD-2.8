@@ -234,6 +234,41 @@ esp_err_t DeviceConfig::toggleMirror() {
     return ESP_OK;
 }
 
+esp_err_t DeviceConfig::adjustBrightness(int deltaPercent) {
+    DeviceSettings candidate = snapshot();
+    const int requested = static_cast<int>(candidate.brightness) + deltaPercent;
+    const int bounded = std::clamp(requested, 10, 100);
+    // All stored brightness values use 5% increments. Swipe changes are 10%.
+    candidate.brightness = static_cast<uint8_t>((bounded / 5) * 5);
+#if CONFIG_WAZE_HUD_DISPLAY_CYD_28
+    // A manual swipe takes precedence over the ambient-light automation.
+    candidate.autoBrightness = false;
+#endif
+    const DeviceSettings current = snapshot();
+    if (candidate.brightness == current.brightness
+#if CONFIG_WAZE_HUD_DISPLAY_CYD_28
+        && candidate.autoBrightness == current.autoBrightness
+#endif
+    ) {
+        ESP_LOGI(kTag, "Brightness already at %u%%", candidate.brightness);
+        return ESP_OK;
+    }
+
+    ++candidate.revision;
+    const esp_err_t saved = saveSettings(candidate);
+    if (saved != ESP_OK) {
+        ESP_LOGE(kTag, "Swipe brightness save failed: %s", esp_err_to_name(saved));
+        return saved;
+    }
+    taskENTER_CRITICAL(&lock_);
+    active_ = candidate;
+    taskEXIT_CRITICAL(&lock_);
+    ESP_LOGI(kTag, "Brightness changed to %u%% by touch gesture, revision %lu",
+             candidate.brightness, static_cast<unsigned long>(candidate.revision));
+    HudStateStore::instance().refresh();
+    return ESP_OK;
+}
+
 esp_err_t DeviceConfig::cycleSpeedDisplayMode() {
     DeviceSettings candidate = snapshot();
     switch (candidate.speedDisplayMode) {
