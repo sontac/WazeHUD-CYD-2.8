@@ -1,0 +1,4 @@
+# UART0 is reserved for HLP/1 through the onboard CH340 USB-UART bridge.
+CONFIG_ESP_CONSOLE_NONE=y
+# CONFIG_BT_ENABLED is not set
+CONFIG_WAZE_HUD_SERIAL_BAUD=115200

@@ -1,0 +1,5 @@
+WazeHUD-CYD v1.1.5 — ASSET DEDUP TRY1
+
+This trial builds on ASSET-CLEAN1. It deduplicates byte-for-byte identical embedded bitmap arrays by pointing duplicate symbols at one canonical array. It does not change renderer logic, UI layout, transport, protocol, OTA, or image dimensions/colors.
+
+Important: this is a source-level optimization trial. A real ESP-IDF build is still required to verify the final application BIN size and compilation. Please compare V1/V3 screens and alert icons after flashing before release.
