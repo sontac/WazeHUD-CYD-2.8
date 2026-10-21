@@ -4,9 +4,6 @@
 #include "display/hud_renderer.h"
 #include "touch_controller.h"
 #include "sdkconfig.h"
-#if CONFIG_WAZE_HUD_DISPLAY_CYD_28
-#include "esp_adc/adc_oneshot.h"
-#endif
 #include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
@@ -20,9 +17,11 @@
 #include "protocol/hlp_protocol.h"
 #include "state/hud_state_store.h"
 #include "system/system_status.h"
+#include "system/time_sync.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 
 namespace waze_hud {
 namespace {
@@ -36,40 +35,41 @@ constexpr gpio_num_t kOrientationButton = GPIO_NUM_14;
 constexpr TickType_t kLongPressTicks = pdMS_TO_TICKS(1200);
 constexpr TickType_t kDoublePressTicks = pdMS_TO_TICKS(350);
 
-#if CONFIG_WAZE_HUD_DISPLAY_CYD_28
-// CYD GPIO34 LDR: larger ADC readings mean less ambient light.
-constexpr uint8_t lightBrightness(int raw, uint8_t current) {
-    return raw >= 1800 ? 30 : raw <= 1400 ? 70 : current;
-}
-static_assert(lightBrightness(1800, 70) == 30 && lightBrightness(1400, 30) == 70 &&
-              lightBrightness(1600, 30) == 30 && lightBrightness(1600, 70) == 70);
+// Time-based backlight schedule for CYD boards without an ambient-light sensor.
+// Prefer the phone-provided clock; use a valid NTP/system clock as fallback.
+constexpr int64_t kMinimumValidClockEpoch = 1577836800LL; // 2020-01-01 UTC
+constexpr int64_t kVietnamUtcOffsetSeconds = 7LL * 60LL * 60LL;
+constexpr uint8_t kDayBrightnessPercent = 100;
+constexpr uint8_t kNightBrightnessPercent = 60;
 
-adc_oneshot_unit_handle_t initLightSensor() {
-    adc_oneshot_unit_handle_t adc = nullptr;
-    adc_oneshot_unit_init_cfg_t unit{};
-    unit.unit_id = ADC_UNIT_1;
-    if (adc_oneshot_new_unit(&unit, &adc) != ESP_OK) return nullptr;
-    adc_oneshot_chan_cfg_t channel{};
-    channel.atten = ADC_ATTEN_DB_0;
-    channel.bitwidth = ADC_BITWIDTH_DEFAULT;
-    if (adc_oneshot_config_channel(adc, ADC_CHANNEL_6, &channel) != ESP_OK) {
-        adc_oneshot_del_unit(adc);
-        return nullptr;
+bool currentLocalHour(const HudState &state, int &hour) {
+    int64_t localSeconds = 0;
+    if (state.clockUnixSeconds >= kMinimumValidClockEpoch) {
+        const uint64_t nowMs = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+        const uint64_t elapsedMs = nowMs >= state.clockSyncMonotonicMs
+            ? nowMs - state.clockSyncMonotonicMs : 0U;
+        localSeconds = state.clockUnixSeconds + static_cast<int64_t>(elapsedMs / 1000U) +
+                       static_cast<int64_t>(state.timezoneOffsetMinutes) * 60LL;
+    } else {
+        const std::time_t now = std::time(nullptr);
+        if (now < kMinimumValidClockEpoch) return false;
+        // The system-clock fallback is interpreted as Vietnam local time (UTC+7).
+        localSeconds = static_cast<int64_t>(now) + kVietnamUtcOffsetSeconds;
     }
-    return adc;
+    const std::time_t localTime = static_cast<std::time_t>(localSeconds);
+    std::tm localParts{};
+    if (gmtime_r(&localTime, &localParts) == nullptr) return false;
+    hour = localParts.tm_hour;
+    return hour >= 0 && hour <= 23;
 }
 
-bool sampleLight(adc_oneshot_unit_handle_t adc, int &raw) {
-    int sum = 0;
-    for (int i = 0; i < 8; ++i) {
-        int sample = 0;
-        if (adc_oneshot_read(adc, ADC_CHANNEL_6, &sample) != ESP_OK) return false;
-        sum += sample;
-    }
-    raw = sum / 8;
-    return true;
+uint8_t timeScheduledBrightness(const HudState &state, uint8_t fallback, bool *timeKnown = nullptr) {
+    int hour = 0;
+    const bool known = currentLocalHour(state, hour);
+    if (timeKnown) *timeKnown = known;
+    if (!known) return fallback;
+    return (hour >= 18 || hour < 6) ? kNightBrightnessPercent : kDayBrightnessPercent;
 }
-#endif
 
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
 constexpr gpio_num_t kLedRed = GPIO_NUM_4;
@@ -189,6 +189,8 @@ void orientationButtonTask(void *) {
                                 if (result != ESP_OK)
                                     ESP_LOGE(kTag, "Mirror button update failed: %s",
                                              esp_err_to_name(result));
+                                else
+                                    HlpProtocol::instance().requestConfigRefresh();
                                 doublePressed = true;
                                 break;
                             }
@@ -200,6 +202,8 @@ void orientationButtonTask(void *) {
                         if (result != ESP_OK)
                             ESP_LOGE(kTag, "Orientation button update failed: %s",
                                      esp_err_to_name(result));
+                        else
+                            HlpProtocol::instance().requestConfigRefresh();
                     }
                 }
             }
@@ -243,67 +247,42 @@ void uiTask(void *) {
         vTaskDelete(nullptr);
         return;
     }
-#if CONFIG_WAZE_HUD_DISPLAY_CYD_28
-    auto lightAdc = initLightSensor();
-    if (!lightAdc) ESP_LOGW(kTag, "LDR unavailable; using configured brightness");
-    uint8_t autoBrightness = 70;
-    TickType_t lastLightSample = xTaskGetTickCount();
-    int lightRaw = 0;
-    if (lightAdc && sampleLight(lightAdc, lightRaw)) {
-        autoBrightness = lightBrightness(lightRaw, autoBrightness);
-        ESP_LOGI(kTag, "LDR raw=%d, brightness=%u%%", lightRaw, autoBrightness);
-    }
-    auto settings = DeviceConfig::instance().snapshot();
-    if (lightAdc && settings.autoBrightness) settings.brightness = autoBrightness;
-    uint8_t renderedBrightness = settings.brightness;
-#else
-    auto settings = DeviceConfig::instance().snapshot();
-#endif
-    uint32_t renderedSettingsRevision = settings.revision;
     HudState state = HudStateStore::instance().snapshot();
+    DeviceSettings settings = DeviceConfig::instance().snapshot();
+    if (settings.autoBrightness) {
+        bool timeKnown = false;
+        settings.brightness = timeScheduledBrightness(state, settings.brightness, &timeKnown);
+        if (timeKnown)
+            ESP_LOGI(kTag, "Time-based auto brightness active: %u%%", settings.brightness);
+        else
+            ESP_LOGW(kTag, "Auto brightness enabled but clock is not valid; keeping configured brightness %u%%",
+                     settings.brightness);
+    }
+    uint8_t renderedBrightness = settings.brightness;
+    uint32_t renderedSettingsRevision = settings.revision;
     const int64_t renderStartedUs = esp_timer_get_time();
-#if CONFIG_WAZE_HUD_DISPLAY_CYD_28
     renderer.render(state, settings, SystemStatus::instance().snapshot());
-#else
-    renderer.render(state, DeviceConfig::instance().snapshot(), SystemStatus::instance().snapshot());
-#endif
     ESP_LOGI(kTag, "Initial UI frame rendered in %lld ms",
              static_cast<long long>((esp_timer_get_time() - renderStartedUs) / 1000));
     // Touch diagnostic uses the CYD touch controller's separate SPI bus/pins.
     startTouchController();
     for (;;) {
-#if CONFIG_WAZE_HUD_DISPLAY_CYD_28
         const TickType_t timeout = renderer.animationActive() ? pdMS_TO_TICKS(80) : pdMS_TO_TICKS(1000);
         const bool received = HudStateStore::instance().receive(state, timeout);
         settings = DeviceConfig::instance().snapshot();
-        if (lightAdc && settings.autoBrightness &&
-            xTaskGetTickCount() - lastLightSample >= pdMS_TO_TICKS(1000)) {
-            lastLightSample = xTaskGetTickCount();
-            if (sampleLight(lightAdc, lightRaw)) {
-                const uint8_t next = lightBrightness(lightRaw, autoBrightness);
-                if (next != autoBrightness) {
-                    autoBrightness = next;
-                    ESP_LOGI(kTag, "LDR raw=%d, brightness=%u%%", lightRaw, autoBrightness);
-                }
-            }
+        if (settings.autoBrightness) {
+            bool timeKnown = false;
+            const uint8_t scheduled = timeScheduledBrightness(state, settings.brightness, &timeKnown);
+            if (timeKnown) settings.brightness = scheduled;
         }
-        if (lightAdc && settings.autoBrightness) settings.brightness = autoBrightness;
-        if (received || renderer.animationActive() || settings.brightness != renderedBrightness ||
-            settings.revision != renderedSettingsRevision) {
+        if (received || renderer.animationActive() ||
+            settings.brightness != renderedBrightness || settings.revision != renderedSettingsRevision) {
+            if (settings.autoBrightness && settings.brightness != renderedBrightness)
+                ESP_LOGI(kTag, "Time-based auto brightness changed to %u%%", settings.brightness);
             renderer.render(state, settings, SystemStatus::instance().snapshot());
             renderedBrightness = settings.brightness;
             renderedSettingsRevision = settings.revision;
         }
-#else
-        const TickType_t timeout = renderer.animationActive() ? pdMS_TO_TICKS(80) : portMAX_DELAY;
-        const DeviceSettings nextSettings = DeviceConfig::instance().snapshot();
-        if (HudStateStore::instance().receive(state, timeout) || nextSettings.revision != renderedSettingsRevision) {
-            renderer.render(state, nextSettings, SystemStatus::instance().snapshot());
-            renderedSettingsRevision = nextSettings.revision;
-        }
-        else if (renderer.animationActive())
-            renderer.render(state, DeviceConfig::instance().snapshot(), SystemStatus::instance().snapshot());
-#endif
     }
 }
 
@@ -420,6 +399,9 @@ extern "C" void app_main() {
     recordBootReason();
     ESP_ERROR_CHECK(DeviceConfig::instance().init());
     ESP_ERROR_CHECK(HudStateStore::instance().init() ? ESP_OK : ESP_ERR_NO_MEM);
+    const esp_err_t timeResult = startTimeSync();
+    if (timeResult != ESP_OK)
+        ESP_LOGW(kTag, "Time sync startup failed: %s", esp_err_to_name(timeResult));
     const esp_err_t statusResult = SystemStatus::instance().init();
     if (statusResult != ESP_OK)
         ESP_LOGW("APP", "Battery status unavailable: %s", esp_err_to_name(statusResult));

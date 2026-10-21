@@ -1,0 +1,13 @@
+WazeHUD-CYD 2.8 — Touch / App Configuration Synchronization Fix
+
+Áp dụng cho bản BLE.
+
+Mục tiêu:
+- Sau khi thao tác cảm ứng làm thay đổi cấu hình cục bộ (vuốt chỉnh sáng hoặc chạm đôi đổi giao diện), firmware yêu cầu HLP task gửi lại schema cấu hình hiện tại.
+- Schema được gửi trong task giao thức, không gửi trực tiếp từ touch task, tránh gọi transport BLE/USB đồng thời với luồng HLP.
+- Bổ sung đồng bộ tương tự sau nút vật lý xoay/đảo HUD.
+- Chỉ gửi schema khi peer đã khai báo capability device_config và phiên kết nối còn hoạt động.
+- Không thay đổi giao thức HLP hoặc driver cảm ứng XPT2046.
+
+Build: mở ESP-IDF PowerShell trong thư mục dự án và chạy lệnh build đang dùng cho nhánh CYD.
+Chưa được build/test phần cứng trong môi trường tạo gói; cần xác nhận build và thử app sau khi nạp.

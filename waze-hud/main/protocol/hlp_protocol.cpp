@@ -18,11 +18,25 @@ namespace {
 #endif
 constexpr char kTag[] = "HLP";
 constexpr TickType_t kStaleTimeout = pdMS_TO_TICKS(3000);
+
+bool peerAdvertisesDeviceConfig(const cJSON *root) {
+    const cJSON *caps = cJSON_GetObjectItemCaseSensitive(root, "caps");
+    if (!cJSON_IsArray(caps)) return false;
+    const cJSON *entry = nullptr;
+    cJSON_ArrayForEach(entry, caps) {
+        if (cJSON_IsString(entry) && std::strcmp(entry->valuestring, "device_config") == 0) return true;
+    }
+    return false;
+}
 }
 
 HlpProtocol &HlpProtocol::instance() {
     static HlpProtocol protocol;
     return protocol;
+}
+
+void HlpProtocol::requestConfigRefresh() {
+    configRefreshRequested_.store(true, std::memory_order_release);
 }
 
 esp_err_t HlpProtocol::start() {
@@ -59,6 +73,7 @@ void HlpProtocol::run() {
                     break;
                 }
                 case BleEventKind::Disconnected: {
+                    peerSupportsConfig_ = false;
                     decoder_.resetSession();
                     hlp_receiver_init(&receiver_, frameEntry, this);
                     HudStateStore::instance().publish(HudState{});
@@ -78,6 +93,14 @@ void HlpProtocol::run() {
                         ESP_LOGW(kTag, "Dropped malformed UTF-8 frame (total=%lu)", static_cast<unsigned long>(lastMalformedUtf8_));
                     }
                     break;
+            }
+        }
+        if (configRefreshRequested_.exchange(false, std::memory_order_acq_rel)) {
+            if (peerSupportsConfig_ && BleTransport::instance().connected()) {
+                ESP_LOGI(kTag, "Refreshing device configuration schema after local change");
+                DeviceConfig::instance().publishSchema(sendEntry, nullptr);
+            } else {
+                ESP_LOGD(kTag, "Skipping config schema refresh: peer is not ready");
             }
         }
         HudState current = HudStateStore::instance().snapshot();
@@ -129,6 +152,7 @@ void HlpProtocol::handleFrame(const char *line, size_t length) {
     HudState state = HudStateStore::instance().snapshot();
     bool changed = false;
     if (std::strcmp(type->valuestring, "hi") == 0) {
+        peerSupportsConfig_ = peerAdvertisesDeviceConfig(root);
         const cJSON *app = cJSON_GetObjectItemCaseSensitive(root, "app");
         const cJSON *appVersion = cJSON_GetObjectItemCaseSensitive(root, "appv");
         const cJSON *rate = cJSON_GetObjectItemCaseSensitive(root, "rate");

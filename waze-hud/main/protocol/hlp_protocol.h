@@ -4,6 +4,7 @@
 #include "protocol/hlp_decoder.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
+#include <atomic>
 
 namespace waze_hud {
 
@@ -11,6 +12,8 @@ class HlpProtocol {
 public:
     static HlpProtocol &instance();
     esp_err_t start();
+    // Request schema refresh after a local (touch/button) setting change.
+    void requestConfigRefresh();
 
 private:
     HlpProtocol() = default;
@@ -28,6 +31,8 @@ private:
     uint32_t lastOversized_{0};
     uint32_t lastMalformedUtf8_{0};
     TickType_t lastPeerActivity_{0};
+    std::atomic<bool> configRefreshRequested_{false};
+    bool peerSupportsConfig_{false};
 };
 
 }  // namespace waze_hud

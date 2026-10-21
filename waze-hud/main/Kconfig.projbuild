@@ -16,6 +16,24 @@ config WAZE_HUD_MOCK_MODE
         Minimum speed remains mock-only; lane guidance also exercises the
         real HLP/1 direction-mask representation.
 
+config WAZE_HUD_WIFI_NTP
+    bool "Enable Wi-Fi and NTP clock synchronization"
+    default y
+    help
+        Connect to a configured Wi-Fi access point and synchronize the ESP32
+        system clock with NTP. The calendar remains available from a valid
+        system clock while Wi-Fi is temporarily disconnected.
+
+config WAZE_HUD_WIFI_SSID
+    string "Wi-Fi network name (SSID)"
+    default ""
+    depends on WAZE_HUD_WIFI_NTP
+
+config WAZE_HUD_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+    depends on WAZE_HUD_WIFI_NTP
+
 config WAZE_HUD_DEFAULT_BRIGHTNESS
     int "Default backlight brightness (percent)"
     range 10 100
