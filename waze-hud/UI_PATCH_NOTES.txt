@@ -1,0 +1,15 @@
+CYD BLE v1.1.7 — UI patch from the uploaded source
+
+Changes:
+- V1 main speed readout moved down 10 px; V2 speed readout untouched.
+- V1/V2 second warning icon enlarged from radius 13 to 22 and uses the dominant-size asset.
+- V1/V2 second warning distance label changed to medium font and moved down to y=128.
+- V3 warning card 2 distance label width increased from 54 to 60 px to reduce unit truncation.
+- Distance units standardized: meters display as M; kilometers display as Km.
+
+Source-only patch. Firmware build and physical CYD display test have not been performed.
+
+Photo-based adjustment: ETA label moved down 2 px; remaining distance moved down 1 px. Bottom street-name and clock rendering left unchanged. Calendar clipping requires on-device verification.
+
+
+Bổ sung chỉnh sửa: V1 dịch số tốc độ lên thêm 3 px (mainY 55 -> 52). Các thay đổi khác giữ nguyên.

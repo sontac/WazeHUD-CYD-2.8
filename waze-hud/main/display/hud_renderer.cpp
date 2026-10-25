@@ -578,8 +578,8 @@ int targetDistanceM(int meters) {
 void formatDistance(int meters, char *output, size_t capacity) {
     if (meters < 0) { output[0] = 0; return; }
     if (meters < 1000) std::snprintf(output, capacity, "%d M", meters);
-    else if (meters < 10000) std::snprintf(output, capacity, "%.1f KM", meters / 1000.0);
-    else std::snprintf(output, capacity, "%d KM", (meters + 500) / 1000);
+    else if (meters < 10000) std::snprintf(output, capacity, "%.1f Km", meters / 1000.0);
+    else std::snprintf(output, capacity, "%d Km", (meters + 500) / 1000);
 }
 
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
@@ -613,7 +613,7 @@ void drawDistanceCyd(Canvas &canvas, int centerX, int baselineY, int meters,
 
     char integerPart[12];
     char decimalPart[4] = {};
-    const char *unit = meters < 1000 ? "m" : "km";
+    const char *unit = meters < 1000 ? "M" : "Km";
     bool hasDecimal = false;
     if (meters < 1000) {
         std::snprintf(integerPart, sizeof(integerPart), "%d", meters);
@@ -1100,8 +1100,8 @@ void HudRenderer::renderV2NextStreet(Canvas &canvas, const HudState &state,
     const int textY = std::max(0, (layout::V2NextStreet.height - assets::kTextMedium.lineHeight) / 2 - 1);
     // V3 TEST1: replace the top-right clock with remaining-route distance.
     // Reserve a wider right-hand field for labels such as "ETA: 12 KM".
-    constexpr int etaX = 202;
-    constexpr int etaWidth = 114;
+    constexpr int etaX = 196;
+    constexpr int etaWidth = 117;
     if (state.nextStreet[0] != 0) {
         canvas.fontText(4, textY, state.nextStreet.data(), assets::kTextMedium,
                         foreground(settings), etaX - 8, false);
@@ -1136,7 +1136,7 @@ void HudRenderer::renderV2Maneuver(Canvas &canvas, const HudState &state, const 
     // UI NEW-07: move the maneuver icon upward and give the distance a larger
     // native bitmap font. No bitmap scaling is used, so the digits stay crisp.
     // V3 UI TEST3: shift the entire maneuver indicator slightly left.
-    canvas.setTranslation(settings.offsetX + 12, settings.offsetY - 24);
+    canvas.setTranslation(settings.offsetX + 16, settings.offsetY - 24);
     drawManeuverIcon(canvas, state.maneuver, state.roundaboutExit, fg);
     canvas.setTranslation(settings.offsetX, settings.offsetY);
     drawDistanceCyd(canvas, 50, 116, state.maneuverDistanceM,
@@ -1172,9 +1172,9 @@ void HudRenderer::renderV2SpeedCluster(Canvas &canvas, const HudState &state,
     const assets::BitmapFont &speedFont = isV3 ? assets::kNumberLarge : assets::kNumberSpeed;
     const int speedX = -22; // Keep the readout aligned with the established V3 cluster.
     // Keep the V3 readout at the lowered position confirmed in TEST1/TEST2.
-    const int speedY = isV3 ? 29 : 21;
+    const int speedY = isV3 ? 39 : 21;
     canvas.fontText(speedX, speedY, speed, speedFont, speedColor, 108, true, false);
-    canvas.fontText(-22, isV3 ? 82 : 78, "km/h", assets::kTextMedium, colors::Muted, 108, true);
+    canvas.fontText(-22, isV3 ? 85 : 78, "km/h", assets::kTextMedium, colors::Muted, 108, true);
 
     // V3 TEST1: use the V2 speed-limit sign style (red outer ring and white
     // face) and position it 3px above the bottom of this 120px-high region.
@@ -1265,24 +1265,24 @@ void HudRenderer::renderV2Alerts(Canvas &canvas, const HudState &state, const De
     }
 
     const AlertState warnings[2] = {warning1, warning2};
-    // Final spacing: warning 1 moves another 6 px left; warning 2 moves
-    // another 3 px left. Keep distance labels centered on their own icons.
+    // V3: shift both warning icons and their distance labels 3 px left.
+    // Keep distance labels centered on their own icons.
     // Widen warning 1's label to prevent long distances from becoming "...";
     // keep warning 2 inside the panel edge to avoid the overspeed border.
-    const int centers[2] = {66, 130};
-    const int labelWidths[2] = {60, 54};
+    const int centers[2] = {45, 109};
+    const int labelWidths[2] = {60, 60};
     for (int index = 0; index < 2; ++index) {
         const AlertState &warning = warnings[index];
         if (warning.kind == AlertKind::None) continue;
-        drawAlertIcon(canvas, centers[index], 45, 17, warning, true);
+        drawAlertIcon(canvas, centers[index], index == 1 ? 39 : 41, 17, warning, true);
         char distance[16] = {};
         formatDistance(targetDistanceM(warning.distanceM), distance, sizeof(distance));
         const int labelWidth = labelWidths[index];
-        canvas.fontText(centers[index] - labelWidth / 2, 64, distance, assets::kTextMedium,
+        canvas.fontText(centers[index] - labelWidth / 2, index == 0 ? 59 : 59, distance, assets::kTextMedium,
                         alertDistanceColor(warning.distanceM, foreground(settings)),
                         labelWidth, true);
         if (warning.kind == AlertKind::TrafficJam) {
-            canvas.fontText(centers[index] - 31, 75,
+            canvas.fontText(centers[index] - 31, index == 0 ? 75 : 73,
                             trafficSeverityLabel(warning.trafficSeverity), assets::kTextSmall,
                             trafficSeverityColor(warning.trafficSeverity), 62, true);
         }
@@ -1297,9 +1297,9 @@ void HudRenderer::renderV2Alerts(Canvas &canvas, const HudState &state, const De
         primary.valueKmh = 0;
     }
     if (primary.kind != AlertKind::None) {
-        drawAlertIcon(canvas,40,mainY(34),22,primary,true);
+        drawAlertIcon(canvas,41,mainY(23),22,primary,true); // V1/V2: alert 1 icon up 7px total.
         char distance[16]; formatDistance(targetDistanceM(primary.distanceM),distance,sizeof(distance));
-        canvas.fontText(2,mainY(60),distance,assets::kTextMedium,
+        canvas.fontText(3,mainY(45),distance,assets::kTextMedium,
                         alertDistanceColor(primary.distanceM, foreground(settings)),76,true);
         if (primary.kind == AlertKind::TrafficJam) {
             char trafficDetail[48];
@@ -1310,7 +1310,7 @@ void HudRenderer::renderV2Alerts(Canvas &canvas, const HudState &state, const De
             else
                 std::snprintf(trafficDetail, sizeof(trafficDetail), "%.20s",
                               trafficSeverityLabel(primary.trafficSeverity));
-            canvas.fontText(1,mainY(78),trafficDetail,assets::kTextSmall,
+            canvas.fontText(3,mainY(78),trafficDetail,assets::kTextSmall,
                             trafficSeverityColor(primary.trafficSeverity),93,true);
         }
     }
@@ -1324,19 +1324,19 @@ void HudRenderer::renderV2Alerts(Canvas &canvas, const HudState &state, const De
                 upcoming = state.upcomingAlerts[index];
         }
         if (upcoming.kind != AlertKind::None && !(upcoming == primary)) {
-            drawAlertIcon(canvas,40,mainY(105),13,upcoming,false);
+            drawAlertIcon(canvas,41,mainY(89),22,upcoming,true); // V1: alert 2 moved up 4px.
             char distance[12]; formatDistance(targetDistanceM(upcoming.distanceM),distance,sizeof(distance));
-            canvas.fontText(2,mainY(121),distance,assets::kTextSmall,
+            canvas.fontText(3,mainY(117),distance,assets::kTextMedium,
                             alertDistanceColor(upcoming.distanceM, colors::Muted),76,true);
         }
     } else {
         const uint8_t count = std::min<uint8_t>(1,state.upcomingAlertCount);
         for (uint8_t index = 0; index < count; ++index) {
-            drawAlertIcon(canvas,40,mainY(105),13,
-                          state.upcomingAlerts[index],false);
+            drawAlertIcon(canvas,41,mainY(97),22,
+                          state.upcomingAlerts[index],true);
             char distance[12];
             formatDistance(targetDistanceM(state.upcomingAlerts[index].distanceM),distance,sizeof(distance));
-            canvas.fontText(2,mainY(121),distance,assets::kTextSmall,
+            canvas.fontText(3,mainY(117),distance,assets::kTextMedium,
                             alertDistanceColor(state.upcomingAlerts[index].distanceM,
                                                colors::Muted),76,true);
         }
@@ -1378,7 +1378,7 @@ void HudRenderer::renderV2Guidance(Canvas &canvas, const HudState &state,
             constexpr int colonWidth = 8;
             constexpr int gap = 4;
             const int totalWidth = digitWidth + gap + colonWidth + gap + minuteWidth;
-            const int startX = (layout::V2Guidance.width - totalWidth) / 2;
+            const int startX = (layout::V2Guidance.width - totalWidth) / 2 - 6;
             const int textY = 7;
             canvas.fontText(startX, textY, hours, assets::kNumberLarge, colors::White, digitWidth, false);
             const int colonX = startX + digitWidth + gap + 2;
@@ -1396,7 +1396,7 @@ void HudRenderer::renderV2Guidance(Canvas &canvas, const HudState &state,
     constexpr int laneRight = layout::Width;
 
     canvas.fillRect(0, 0, layout::Width, 1, colors::Muted);
-    canvas.fillRect(etaWidth - 1, 4, 1, layout::GuidanceHeight - 8, colors::Muted);
+    canvas.fillRect(etaWidth - 1, 7, 1, layout::GuidanceHeight - 8, colors::Muted);
 
     if (state.eta[0] != 0) {
         canvas.fontText(0, 2, "ETA", assets::kTextSmall, colors::Muted, etaWidth - 2, true);
@@ -1433,11 +1433,11 @@ void HudRenderer::renderV2Guidance(Canvas &canvas, const HudState &state,
             const int gap = 4;
             const int totalWidth = numberWidth + gap + unitWidth;
             const int startX = std::max(0, (etaWidth - totalWidth) / 2);
-            canvas.fontText(startX, 32, numberPart, assets::kTextMedium, fg, numberWidth, false);
-            canvas.fontText(startX + numberWidth + gap, 39, unitPart, assets::kTextSmall, fg,
+            canvas.fontText(startX, 41, numberPart, assets::kTextMedium, fg, numberWidth, false);
+            canvas.fontText(startX + numberWidth + gap, 45, unitPart, assets::kTextSmall, fg,
                             unitWidth, false);
         } else {
-            canvas.fontText(0, 32, remainingDistance, assets::kTextMedium, fg, etaWidth - 2, true);
+            canvas.fontText(0, 35, remainingDistance, assets::kTextMedium, fg, etaWidth - 2, true);
         }
     }
 
@@ -1456,17 +1456,18 @@ void HudRenderer::renderV2Guidance(Canvas &canvas, const HudState &state,
 
 void HudRenderer::renderV2Street(Canvas &canvas, const HudState &state, const DeviceSettings &settings) {
     canvas.clear(colors::Panel);
-    const int textY = std::max(0, (layout::V2StreetHeight - assets::kTextMedium.lineHeight) / 2 - 2);
+    const int streetViewportHeight = layout::V2Street.height - 6; // reserve bottom safe inset
+    const int textY = std::max(0, (streetViewportHeight - assets::kTextMedium.lineHeight) / 2);
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
     // V3 lower layout: street name ends before the right-side warning cards.
     // The renderer-level marquee uses the matching 150px text viewport.
     if (settings.showStreet) {
         const char *street = displayStreet(state);
         if (marqueeActive_)
-            canvas.fontText(5 - marqueeOffset_, textY, street, assets::kTextMedium,
+            canvas.fontText(9 - marqueeOffset_, textY, street, assets::kTextMedium,
                             foreground(settings), -1, false);
         else
-            canvas.fontText(5, textY, street, assets::kTextMedium,
+            canvas.fontText(9, textY, street, assets::kTextMedium,
                             foreground(settings), layout::V3Street.width - 10, true);
     }
 #else
@@ -1479,8 +1480,8 @@ void HudRenderer::renderV2Street(Canvas &canvas, const HudState &state, const De
             canvas.fontText(5-marqueeOffset_,textY,street,assets::kTextMedium,
                             foreground(settings),-1,false);
         else
-            canvas.fontText(5,textY,street,assets::kTextMedium,foreground(settings),
-                            haveClock ? 248 : 310,true);
+            canvas.fontText(0,textY,street,assets::kTextMedium,foreground(settings),
+                            haveClock ? 248 : layout::Width,true);
     }
     if (haveClock) {
         canvas.fillRect(255,0,65,layout::Street.height,colors::Panel);
@@ -1491,7 +1492,9 @@ void HudRenderer::renderV2Street(Canvas &canvas, const HudState &state, const De
         char clock[8];
         std::snprintf(clock,sizeof(clock),"%02d%c%02d",
                       hour24,separator,normalizedMinute % 60);
-        canvas.fontText(260,textY,clock,assets::kTextMedium,colors::White,55,true);
+        const int clockWidth = canvas.fontTextWidth(clock, assets::kTextMedium);
+        canvas.fontText(layout::Width - 13 - clockWidth,textY,clock,assets::kTextMedium,
+                        colors::White,clockWidth,false);
     }
 #endif
 }
@@ -1499,9 +1502,27 @@ void HudRenderer::renderV2Street(Canvas &canvas, const HudState &state, const De
 void HudRenderer::renderRegion(const Rect &region, const HudState &state,
                                const DeviceSettings &settings,
                                const SystemStatusSnapshot &systemStatus) {
-    const Rect physicalRegion = layout::physicalRect(region);
+    // Layout-calibration pass: reserve a 6px safe inset wherever a render
+    // region touches the physical screen perimeter. This is independent of
+    // the red overspeed border (whose own thickness/behavior is unchanged).
+    // Internal shared edges are intentionally left untouched.
+    Rect renderRegion = region;
+#if CONFIG_WAZE_HUD_DISPLAY_CYD_28
+    constexpr int kSafeInset = 6;
+    if (renderRegion.x == 0) {
+        renderRegion.x += kSafeInset;
+        renderRegion.width -= kSafeInset;
+    }
+    if (renderRegion.y == 0) {
+        renderRegion.y += kSafeInset;
+        renderRegion.height -= kSafeInset;
+    }
+    if (region.x + region.width == layout::Width) renderRegion.width -= kSafeInset;
+    if (region.y + region.height == layout::Height) renderRegion.height -= kSafeInset;
+#endif
+    const Rect physicalRegion = layout::physicalRect(renderRegion);
     Canvas canvas(buffer_, physicalRegion.width, physicalRegion.height,
-                  region.width, region.height);
+                  renderRegion.width, renderRegion.height);
     // V1 main regions now start at Y=30 so the entire top strip can be
     // dedicated to the next-street header. Preserve every existing V1
     // drawing coordinate by translating the clipped region back by 30px.
@@ -1718,8 +1739,8 @@ void HudRenderer::renderSpeed(Canvas &canvas, const HudState &state, const Devic
     char speed[5]; std::snprintf(speed,sizeof(speed),"%d",adjustedSpeed(state.speedKmh, settings));
     // TEST3: shift the V1 speed readout 4px left. Negative X is intentional;
     // the V1 speed region is clipped to its own column, keeping pixels in bounds.
-    canvas.fontText(-4,mainY(42),speed,assets::kNumberLarge,color,76,true);
-    canvas.fontText(-4,mainY(101),"km/h",assets::kTextMedium,colors::Muted,76,true);
+    canvas.fontText(0,mainY(52),speed,assets::kNumberLarge,color,80,true); // V1: centered horizontally.
+    canvas.fontText(0,mainY(101),"km/h",assets::kTextMedium,colors::Muted,80,true);
 }
 
 void HudRenderer::renderLimitPrimary(Canvas &canvas, const HudState &state,
@@ -1782,7 +1803,7 @@ void HudRenderer::renderLimits(Canvas &canvas, const HudState &state, const Devi
     // TEST3 FIX: the V1 region is clipped to global Y=30..119. With an 84px
     // sign, centers below Y=72 clip the top of the sign. Center at Y=74 so
     // the full sign fits with a small top margin. V3 is unchanged.
-    constexpr int signX = 40;
+    constexpr int signX = 41;
     constexpr int signY = 74;
     if (state.speedLimitKmh > 0) {
         const assets::ColorBitmap *sign = speedLimitCurrentRingAsset(state.speedLimitKmh);
@@ -1807,9 +1828,9 @@ void HudRenderer::renderLimits(Canvas &canvas, const HudState &state, const Devi
                            assets::kNoSpeedCurrent);
     }
     if (state.hasMinimumSpeed) {
-        canvas.fillCircle(40,mainY(101),17,colors::Blue);
+        canvas.fillCircle(41,mainY(101),17,colors::Blue);
         char value[5]; std::snprintf(value,sizeof(value),"%d",state.minimumSpeedKmh);
-        canvas.fontText(23,mainY(101)-assets::kNumberSmall.lineHeight/2,value,
+        canvas.fontText(24,mainY(101)-assets::kNumberSmall.lineHeight/2,value,
                         assets::kNumberSmall,colors::White,34,true);
     }
 }
@@ -1824,9 +1845,9 @@ void HudRenderer::renderAlerts(Canvas &canvas, const HudState &state, const Devi
         primary.valueKmh = 0;
     }
     if (primary.kind != AlertKind::None) {
-        drawAlertIcon(canvas,40,mainY(34),22,primary,true);
+        drawAlertIcon(canvas,39,mainY(23),22,primary,true); // V1/V2: alert 1 icon up 7px total.
         char distance[16]; formatDistance(targetDistanceM(primary.distanceM),distance,sizeof(distance));
-        canvas.fontText(2,mainY(60),distance,assets::kTextMedium,
+        canvas.fontText(1,mainY(45),distance,assets::kTextMedium,
                         alertDistanceColor(primary.distanceM, foreground(settings)),76,true);
         if (primary.kind == AlertKind::TrafficJam) {
             char trafficDetail[48];
@@ -1851,19 +1872,19 @@ void HudRenderer::renderAlerts(Canvas &canvas, const HudState &state, const Devi
                 upcoming = state.upcomingAlerts[index];
         }
         if (upcoming.kind != AlertKind::None && !(upcoming == primary)) {
-            drawAlertIcon(canvas,40,mainY(105),13,upcoming,false);
+            drawAlertIcon(canvas,37,mainY(89),22,upcoming,true); // V1: alert 2 moved up 4px.
             char distance[12]; formatDistance(targetDistanceM(upcoming.distanceM),distance,sizeof(distance));
-            canvas.fontText(2,mainY(121),distance,assets::kTextSmall,
+            canvas.fontText(-1,mainY(117),distance,assets::kTextMedium,
                             alertDistanceColor(upcoming.distanceM, colors::Muted),76,true);
         }
     } else {
         const uint8_t count = std::min<uint8_t>(1,state.upcomingAlertCount);
         for (uint8_t index = 0; index < count; ++index) {
-            drawAlertIcon(canvas,40,mainY(105),13,
-                          state.upcomingAlerts[index],false);
+            drawAlertIcon(canvas,40,mainY(97),22,
+                          state.upcomingAlerts[index],true);
             char distance[12];
             formatDistance(targetDistanceM(state.upcomingAlerts[index].distanceM),distance,sizeof(distance));
-            canvas.fontText(2,mainY(121),distance,assets::kTextSmall,
+            canvas.fontText(-1,mainY(117),distance,assets::kTextMedium,
                             alertDistanceColor(state.upcomingAlerts[index].distanceM,
                                                colors::Muted),76,true);
         }
@@ -1879,19 +1900,21 @@ void HudRenderer::renderGuidance(Canvas &canvas, const HudState &state,
     constexpr int laneLeft = etaWidth;
     constexpr int laneRight = layout::Width;
 
-    canvas.fillRect(0, 0, layout::Width, 1, colors::Muted);
-    canvas.fillRect(etaWidth - 1, 4, 1, layout::GuidanceHeight - 8, colors::Muted);
+    canvas.fillRect(4, 7, layout::Width - 4, 1, colors::Muted);
+    canvas.fillRect(etaWidth - 1, 7, 1, layout::GuidanceHeight - 4, colors::Muted);
 
     if (!state.navigationActive) {
-        // No navigation: leave the former ETA/clock area empty and keep
-        // the compact Vietnamese solar/lunar calendar on the right.
+        // No navigation: keep the compact Vietnamese solar/lunar calendar
+        // visible in the lane panel.
+        canvas.setTranslation(0, 7);
         drawV1V2NoNavigationCalendar(canvas, state, laneLeft + 2,
                                      laneRight - laneLeft - 4);
+        canvas.setTranslation(0, 0);
         return;
     }
 
     if (state.eta[0] != 0) {
-        canvas.fontText(0, 2, "ETA", assets::kTextSmall, colors::Muted, etaWidth - 2, true);
+        canvas.fontText(0, 7, "ETA", assets::kTextSmall, colors::Muted, etaWidth - 2, true);
 
         // UI v12.2: always show ETA in 24-hour format, independent of the
         // phone/WazeMod display setting. When remainingMinutes is available,
@@ -1910,9 +1933,9 @@ void HudRenderer::renderGuidance(Canvas &canvas, const HudState &state,
         }
 
         if (formattedEta)
-            canvas.fontText(0, 14, eta24, assets::kTextMedium, fg, etaWidth - 2, true);
+            canvas.fontText(0, 17, eta24, assets::kTextMedium, fg, etaWidth - 2, true);
         else
-            canvas.fontText(0, 14, state.eta.data(), assets::kTextMedium, fg, etaWidth - 2, true);
+            canvas.fontText(0, 17, state.eta.data(), assets::kTextMedium, fg, etaWidth - 2, true);
     }
 
     // UI v12.5: widen the ETA column so medium-size remaining distances such
@@ -1940,12 +1963,12 @@ void HudRenderer::renderGuidance(Canvas &canvas, const HudState &state,
             const int totalWidth = numberWidth + gap + unitWidth;
             const int startX = std::max(0, (etaWidth - totalWidth) / 2);
 
-            canvas.fontText(startX, 32, numberPart, assets::kTextMedium, fg,
+            canvas.fontText(startX, 35, numberPart, assets::kTextMedium, fg,
                             numberWidth, false);
-            canvas.fontText(startX + numberWidth + gap, 39, unitPart, assets::kTextSmall, fg,
+            canvas.fontText(startX + numberWidth + gap, 42, unitPart, assets::kTextSmall, fg,
                             unitWidth, false);
         } else {
-            canvas.fontText(0, 32, remainingDistance, assets::kTextMedium, fg,
+            canvas.fontText(0, 35, remainingDistance, assets::kTextMedium, fg,
                             etaWidth - 2, true);
         }
     }
@@ -1959,16 +1982,27 @@ void HudRenderer::renderGuidance(Canvas &canvas, const HudState &state,
         const int spacing = std::min(32, available / static_cast<int>(laneCount));
         const int totalWidth = spacing * static_cast<int>(laneCount);
         const int firstX = laneLeft + (available - totalWidth) / 2 + spacing / 2 + 3;
+        canvas.setTranslation(0, 7);
         for (uint8_t index = 0; index < laneCount; ++index)
             drawGuidanceLane(canvas, firstX + index * spacing, spacing,
                              state.lanes[index], fg);
+        canvas.setTranslation(0, 0);
+    } else {
+        // Keep the calendar visible whenever lane guidance is absent, even
+        // during active navigation. ETA and remaining distance remain visible
+        // in the separate left column.
+        canvas.setTranslation(0, 7);
+        drawV1V2NoNavigationCalendar(canvas, state, laneLeft + 2,
+                                     laneRight - laneLeft - 4);
+        canvas.setTranslation(0, 0);
     }
 
 }
 
 void HudRenderer::renderStreet(Canvas &canvas, const HudState &state, const DeviceSettings &settings) {
     canvas.clear(colors::Panel);
-    const int textY = std::max(0, (layout::StreetHeight - assets::kTextMedium.lineHeight) / 2);
+    const int streetViewportHeight = layout::StreetHeight - 6; // renderRegion trims 6px at screen bottom
+    const int textY = std::max(0, (streetViewportHeight - assets::kTextMedium.lineHeight) / 2);
     const int64_t millis = localClockMillis(state);
     const int64_t second = millis == INT64_MIN ? INT64_MIN : millis / 1000LL;
     const bool haveClock = second != INT64_MIN;
@@ -1978,8 +2012,8 @@ void HudRenderer::renderStreet(Canvas &canvas, const HudState &state, const Devi
             canvas.fontText(5-marqueeOffset_,textY,street,assets::kTextMedium,
                             foreground(settings),-1,false);
         else
-            canvas.fontText(5,textY,street,assets::kTextMedium,foreground(settings),
-                            haveClock ? 248 : 310,true);
+            canvas.fontText(0,textY,street,assets::kTextMedium,foreground(settings),
+                            haveClock ? 248 : layout::Width,true);
     }
     if (haveClock) {
         // Clip marquee pixels before painting the independent clock column.
@@ -1994,7 +2028,9 @@ void HudRenderer::renderStreet(Canvas &canvas, const HudState &state, const Devi
         std::snprintf(clock,sizeof(clock),"%02d%c%02d",
                       hour24,separator,normalizedMinute % 60);
         // UI v11.2: use full white for the main clock so it remains legible outdoors.
-        canvas.fontText(260,textY,clock,assets::kTextMedium,colors::White,55,true);
+        const int clockWidth = canvas.fontTextWidth(clock, assets::kTextMedium);
+        canvas.fontText(layout::Width - 13 - clockWidth,textY,clock,assets::kTextMedium,
+                        colors::White,clockWidth,false);
     }
 }
 
